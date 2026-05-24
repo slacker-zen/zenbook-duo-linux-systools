@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+
+if [[ "${1:-}" == "post" ]]; then
+  /usr/bin/zenbook-duo-systools apply
+fi

@@ -1,0 +1,11 @@
+[Unit]
+Description=Zenbook Duo user session tools
+After=default.target
+ConditionPathExists=/usr/bin/zenbook-duo-systools
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/zenbook-duo-systools apply
+
+[Install]
+WantedBy=default.target

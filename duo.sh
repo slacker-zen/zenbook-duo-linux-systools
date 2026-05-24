@@ -1,370 +1,313 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
 
-# Default backlight (0-3)
-DEFAULT_BACKLIGHT=1
+# Zenbook Pro Duo / Duo LED new handler
+# Supports:
+# - keyboard attached/detached modes
+# - screen rotation states: normal, left, right, inverted
+# - display layout switching with kscreen-doctor or xrandr fallback
+# - keyboard backlight level
+# - power profile selection for AC vs battery
 
-# Default scale (1-2)
-DEFAULT_SCALE=1
+CONFIG_FILE="/etc/zenbook-duo/duo.conf"
 
-# Capture Ctrl+C and close any subprocesses such as duo-watch-monitor
-trap 'echo "Ctrl+C captured. Exiting..."; pkill -P $$; exit 1' INT
+# Default values, override in config file
+LOWER_SCREEN="eDP-2"
+MAIN_SCREEN="eDP-1"
+MAIN_ROTATION="normal"
+LOWER_ROTATION="normal"
+KEYBOARD_MATCH="Keyboard|ASUS|ASUSTeK|AT Translated Set 2 keyboard"
+BACKLIGHT_LEVEL_PERCENT=50
 
-mkdir -p /tmp/duo
+SUPPORTED_ROTATIONS=(normal left right inverted)
 
-# SCALE=$(gdctl show |grep Scale: |sed 's/│//g' |awk '{print $2}' |head -n1)
-# if [ -z "${SCALE}" ]; then
-#     SCALE=1
-# fi
-SCALE=${DEFAULT_SCALE}
-
-# Python embed
-PYTHON3=$(which python3)
-KEYBOARD_DEV=$(lsusb | grep 'Zenbook Duo Keyboard' |awk '{print $6}')
-if [ -n "${KEYBOARD_DEV}" ] && [ ! -f /tmp/duo/backlight.py ]; then
-    VENDOR_ID=${KEYBOARD_DEV%:*}
-    PRODUCT_ID=${KEYBOARD_DEV#*:}
-    echo "#!/usr/bin/env python3
-
-# BSD 2-Clause License
-#
-# Copyright (c) 2024, Alesya Huzik
-#
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are met:
-#
-# 1. Redistributions of source code must retain the above copyright notice, this
-#    list of conditions and the following disclaimer.
-
-# 2. Redistributions in binary form must reproduce the above copyright notice,
-#    this list of conditions and the following disclaimer in the documentation
-#    and/or other materials provided with the distribution.
-#
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-# DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
-# FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
-# DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
-# SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
-# CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
-# OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-import sys
-import usb.core
-import usb.util
-
-# USB Parameters
-VENDOR_ID = 0x${VENDOR_ID}
-PRODUCT_ID = 0x${PRODUCT_ID}
-REPORT_ID = 0x5A
-WVALUE = 0x035A
-WINDEX = 4
-WLENGTH = 16
-
-if len(sys.argv) != 2:
-    print(f\"Usage: {sys.argv[0]} <level>\")
-    sys.exit(1)
-
-try:
-    level = int(sys.argv[1])
-    if level < 0 or level > 3:
-        raise ValueError
-except ValueError:
-    print(\"Invalid level. Must be an integer between 0 and 3.\")
-    sys.exit(1)
-
-# Prepare the data packet
-data = [0] * WLENGTH
-data[0] = REPORT_ID
-data[1] = 0xBA
-data[2] = 0xC5
-data[3] = 0xC4
-data[4] = level
-
-# Find the device
-dev = usb.core.find(idVendor=VENDOR_ID, idProduct=PRODUCT_ID)
-
-if dev is None:
-    print(f\"Device not found (Vendor ID: 0x{VENDOR_ID:04X}, Product ID: 0x{PRODUCT_ID:04X})\")
-    sys.exit(1)
-
-# Detach kernel driver if necessary
-if dev.is_kernel_driver_active(WINDEX):
-    try:
-        dev.detach_kernel_driver(WINDEX)
-    except usb.core.USBError as e:
-        print(f\"Could not detach kernel driver: {str(e)}\")
-        sys.exit(1)
-
-# try:
-#     dev.set_configuration()
-#     usb.util.claim_interface(dev, WINDEX)
-# except usb.core.USBError as e:
-#     print(f\"Could not set configuration or claim interface: {str(e)}\")
-#     sys.exit(1)
-
-# Send the control transfer
-try:
-    bmRequestType = 0x21  # Host to Device | Class | Interface
-    bRequest = 0x09       # SET_REPORT
-    wValue = WVALUE       # 0x035A
-    wIndex = WINDEX       # Interface number
-    ret = dev.ctrl_transfer(bmRequestType, bRequest, wValue, wIndex, data, timeout=1000)
-    if ret != WLENGTH:
-        print(f\"Warning: Only {ret} bytes sent out of {WLENGTH}.\")
-    else:
-        print(\"Data packet sent successfully.\")
-except usb.core.USBError as e:
-    print(f\"Control transfer failed: {str(e)}\")
-    usb.util.release_interface(dev, WINDEX)
-    sys.exit(1)
-
-# Release the interface
-usb.util.release_interface(dev, WINDEX)
-# Reattach the kernel driver if necessary
-try:
-    dev.attach_kernel_driver(WINDEX)
-except usb.core.USBError:
-    pass  # Ignore if we can't reattach the driver
-
-sys.exit(0)
-" > /tmp/duo/backlight.py
-fi
-
-WIFI_BEFORE=$(nmcli radio wifi)
-BLUETOOTH_BEFORE=$(rfkill -n -o SOFT list bluetooth |head -n1)
-KEYBOARD_ATTACHED=false
-if [ -n "$(lsusb | grep 'Zenbook Duo Keyboard')" ]; then
-    KEYBOARD_ATTACHED=true
-fi
-MONITOR_COUNT=$(gdctl show | grep 'Logical monitor #' | wc -l)
-function duo-set-status() {
-    echo "
-        BLUETOOTH_BEFORE=${BLUETOOTH_BEFORE}
-        WIFI_BEFORE=${WIFI_BEFORE}
-        KEYBOARD_ATTACHED=${KEYBOARD_ATTACHED}
-        MONITOR_COUNT=${MONITOR_COUNT}
-    " > /tmp/duo/status
-}
-duo-set-status
-
-function duo-set-kb-backlight() {
-    /usr/bin/sudo ${PYTHON3} /tmp/duo/backlight.py ${1} >/dev/null
+log() {
+  printf '[zenbook-duo-led] %s\n' "$*"
 }
 
-BRIGHTNESS=0
-function duo-sync-display-backlight() {
-    . /tmp/duo/status
-    if [ "${KEYBOARD_ATTACHED}" = false ]; then
-        CUR_BRIGHTNESS=$(cat /sys/class/backlight/intel_backlight/brightness)
-        if [ "${CUR_BRIGHTNESS}" != "${BRIGHTNESS}" ]; then
-            BRIGHTNESS=${CUR_BRIGHTNESS}
-            echo "$(date) - DISPLAY - Setting brightness to $(echo ${BRIGHTNESS} |sudo tee /sys/class/backlight/card1-eDP-2-backlight/brightness)"
-        fi
-    fi
+load_config() {
+  if [[ -f "${CONFIG_FILE}" ]]; then
+    # shellcheck source=/dev/null
+    source "${CONFIG_FILE}"
+  fi
 }
 
-function duo-watch-display-backlight() {
-    while true; do
-        inotifywait -e modify /sys/class/backlight/intel_backlight/brightness >/dev/null 2>&1
-        duo-sync-display-backlight
+keyboard_attached() {
+  if command -v libinput >/dev/null 2>&1; then
+    libinput list-devices 2>/dev/null | grep -Eiq "${KEYBOARD_MATCH}"
+  else
+    for candidate in /dev/input/by-id/*kbd* /dev/input/by-id/*Keyboard* /dev/input/by-path/*kbd* /dev/input/by-path/*keyboard*; do
+      [[ -e "$candidate" ]] && return 0
     done
+    return 1
+  fi
 }
 
-function duo-watch-wifi() {
-    while read -r LINE; do
-        sleep 1
-        . /tmp/duo/status
-        if [ "${KEYBOARD_ATTACHED}" = true ]; then
-            if [[ "${LINE}" = *"<true>"* ]]; then
-                WIFI_BEFORE=enabled
-            else
-                WIFI_BEFORE=disabled
-            fi
-            echo "$(date) - NETWORK - WIFI: ${WIFI_BEFORE}"
-            duo-set-status
-        fi
-    done < <(gdbus monitor -y -d org.freedesktop.NetworkManager | grep --line-buffered WirelessEnabled)
+valid_rotation() {
+  local value="$1"
+  for rotation in "${SUPPORTED_ROTATIONS[@]}"; do
+    [[ "$rotation" == "$value" ]] && return 0
+  done
+  return 1
 }
 
-function duo-watch-bluetooth() {
-    while read -r LINE; do
-        sleep 1
-        . /tmp/duo/status
-        if [ "${KEYBOARD_ATTACHED}" = true ]; then
-            if [[ "${LINE}" = *"<true>"* ]]; then
-                BLUETOOTH_BEFORE=unblocked
-            else
-                BLUETOOTH_BEFORE=blocked
-            fi
-            echo "$(date) - NETWORK - Bluetooth: ${BLUETOOTH_BEFORE}"
-            duo-set-status
-        fi
-    done < <(gdbus monitor -y -d org.bluez | grep --line-buffered "'Powered':")
+set_keyboard_backlight() {
+  local target="$1"
+  local led_path max brightness
+
+  led_path="$(find /sys/class/leds -maxdepth 1 -type l \( -iname '*kbd*' -o -iname '*keyboard*' -o -iname '*asus*' \) | head -n1 || true)"
+  if [[ -z "$led_path" ]]; then
+    log "No keyboard backlight device found."
+    return 0
+  fi
+
+  if [[ ! -r "$led_path/max_brightness" ]]; then
+    log "Unable to read max brightness from $led_path."
+    return 0
+  fi
+
+  max="$(<"$led_path/max_brightness")"
+  brightness=$(( max * target / 100 ))
+  if (( brightness < 1 && max > 0 )); then
+    brightness=1
+  fi
+  if (( brightness > max )); then
+    brightness=$max
+  fi
+
+  if [[ -w "$led_path/brightness" ]]; then
+    printf '%s' "$brightness" >"$led_path/brightness"
+  else
+    printf '%s' "$brightness" | sudo tee "$led_path/brightness" >/dev/null
+  fi
+
+  log "Keyboard backlight set to ${brightness}/${max} (${target}%)"
 }
 
-function duo-watch-lock() {
-    while read -r LINE; do
-        sleep 1
-        echo "$(date) - DEBUG - ${LINE}"
-        . /tmp/duo/status
-        if [ "${KEYBOARD_ATTACHED}" = true ]; then
-            if [[ "${LINE}" = *"<true>"* ]]; then
-                BLUETOOTH_BEFORE=unblocked
-            else
-                BLUETOOTH_BEFORE=blocked
-            fi
-            echo "$(date) - NETWORK - Bluetooth: ${BLUETOOTH_BEFORE}"
-            duo-set-status
-            duo-check-monitor
-        fi
-    done < <(gdbus monitor -y -d org.freedesktop.login1 | grep --line-buffered "LockedHint")
-}
+get_ac_online() {
+  local ac
+  local ac_online="0"
 
-function duo-check-monitor() {
-    . /tmp/duo/status
-    KEYBOARD_ATTACHED=false
-    if [ -n "$(lsusb | grep 'Zenbook Duo Keyboard')" ]; then
-        KEYBOARD_ATTACHED=true
+  for ac in /sys/class/power_supply/AC*/online /sys/class/power_supply/ADP*/online; do
+    if [[ -f "$ac" ]]; then
+      ac_online="$(<"$ac")"
+      break
     fi
-    MONITOR_COUNT=$(gdctl show | grep 'Logical monitor #' | wc -l)
-    duo-set-status
-    echo "$(date) - MONITOR - WIFI before: ${WIFI_BEFORE}, Bluetooth before: ${BLUETOOTH_BEFORE}"
-    echo "$(date) - MONITOR - Keyboard attached: ${KEYBOARD_ATTACHED}, Monitor count: ${MONITOR_COUNT}"
-    if [ ${KEYBOARD_ATTACHED} = true ]; then
-        echo "$(date) - MONITOR - Keyboard attached"
-        duo-set-kb-backlight ${DEFAULT_BACKLIGHT}
-        if [ "${WIFI_BEFORE}" = enabled ]; then
-            echo "$(date) - MONITOR - Turning on WIFI"
-            nmcli radio wifi on
-        fi
-        if [ "${BLUETOOTH_BEFORE}" = unblocked ]; then
-            echo "$(date) - MONITOR - Turning on Bluetooth"
-            rfkill unblock bluetooth
-        else
-            echo "$(date) - MONITOR - Turning off Bluetooth"
-            rfkill block bluetooth
-        fi
-        if ((${MONITOR_COUNT} > 1)); then
-            echo "$(date) - MONITOR - Disabling bottom monitor"
-            gdctl set --logical-monitor --primary --scale ${SCALE} --monitor eDP-1
-            NEW_MONITOR_COUNT=$(gdctl show | grep 'Logical monitor #' | wc -l)
-            if ((${NEW_MONITOR_COUNT} == 1)); then
-                MESSAGE="Disabled bottom display"
-            else
-                MESSAGE="ERROR: Bottom display still on"
-            fi
-            notify-send -a "Zenbook Duo" -t 1000 --hint=int:transient:1 -i "preferences-desktop-display" "${MESSAGE}"
-        fi
+  done
+
+  printf '%s' "$ac_online"
+}
+
+set_power_profile() {
+  local ac_online
+  ac_online="$(get_ac_online)"
+
+  if ! command -v powerprofilesctl >/dev/null 2>&1; then
+    log "powerprofilesctl not available."
+    return 0
+  fi
+
+  if [[ "$ac_online" == "1" ]]; then
+    log "AC power detected → setting performance profile."
+    sudo powerprofilesctl set performance || true
+  else
+    log "Battery power detected → setting balanced profile."
+    sudo powerprofilesctl set balanced || sudo powerprofilesctl set power-saver || true
+  fi
+}
+
+lid_close_action() {
+  local ac_online
+  ac_online="$(get_ac_online)"
+
+  if [[ "$ac_online" == "1" ]]; then
+    log "Lid closed while on AC → suspending."
+    sudo systemctl suspend || log "Suspend command failed."
+  else
+    log "Lid closed on battery → hibernating."
+    sudo systemctl hibernate || log "Hibernate command failed."
+  fi
+}
+
+get_monitor_geometry() {
+  local monitor="$1"
+  local geometry
+
+  if ! command -v xrandr >/dev/null 2>&1; then
+    return 1
+  fi
+
+  geometry="$(xrandr --query | grep -E "^${monitor} connected" | sed -n 's/^.* connected[^0-9]*\([0-9]\+x[0-9]\++[0-9]\++[0-9]\+\).*$/\1/p')"
+  [[ -n "$geometry" ]] || return 1
+  printf '%s' "$geometry"
+}
+
+move_windows_to_main() {
+  if ! command -v wmctrl >/dev/null 2>&1 || ! command -v xrandr >/dev/null 2>&1; then
+    log "wmctrl or xrandr not available; cannot move windows to $MAIN_SCREEN."
+    return 0
+  fi
+
+  local geom
+  geom="$(get_monitor_geometry "$MAIN_SCREEN")" || {
+    log "Could not detect geometry for $MAIN_SCREEN."
+    return 0
+  }
+
+  local main_w main_h main_x main_y dest_x dest_y
+  IFS='x+' read -r main_w main_h main_x main_y <<<"$geom"
+  dest_x=$((main_x + 20))
+  dest_y=$((main_y + 20))
+
+  while IFS= read -r id desktop x y w h rest; do
+    [[ "$id" =~ ^0x[0-9a-fA-F]+$ ]] || continue
+    log "Moving window $id to ${MAIN_SCREEN} at ${dest_x},${dest_y}."
+    wmctrl -i -r "$id" -e "0,$dest_x,$dest_y,$w,$h" >/dev/null 2>&1 || \
+      log "Failed to move window $id."
+  done < <(wmctrl -lG)
+}
+
+apply_display_layout() {
+  local mode="$1"
+  local driver=""
+
+  if command -v kscreen-doctor >/dev/null 2>&1; then
+    driver="kscreen"
+  elif command -v xrandr >/dev/null 2>&1; then
+    driver="xrandr"
+  else
+    log "Neither kscreen-doctor nor xrandr is available."
+    return 0
+  fi
+
+  if [[ "$mode" == "auto" ]]; then
+    if keyboard_attached; then
+      mode="attached"
     else
-        echo "$(date) - MONITOR - Keyboard detached"
-        if [ "${WIFI_BEFORE}" = enabled ]; then
-            echo "$(date) - MONITOR - Turning on WIFI"
-            nmcli radio wifi on
-        fi
-        echo "$(date) - MONITOR - Turning on Bluetooth"
-        rfkill unblock bluetooth
-        if ((${MONITOR_COUNT} < 2)); then
-            echo "$(date) - MONITOR - Enabling bottom monitor"
-            gdctl set --logical-monitor --primary --scale ${SCALE} --monitor eDP-1 --logical-monitor --scale ${SCALE} --monitor eDP-2 --below eDP-1
-            NEW_MONITOR_COUNT=$(gdctl show | grep 'Logical monitor #' | wc -l)
-            if ((${NEW_MONITOR_COUNT} == 2)); then
-                MESSAGE="Enabled bottom display"
-            else
-                MESSAGE="ERROR: Bottom display still off"
-            fi
-            notify-send -a "Zenbook Duo" -t 1000 --hint=int:transient:1 -i "preferences-desktop-display" "${MESSAGE}"
-        fi
+      mode="detached"
     fi
+  fi
+
+  log "Using display mode: $mode"
+
+  if [[ "$driver" == "kscreen" ]]; then
+    if [[ "$mode" == "attached" ]]; then
+      log "Applying attached keyboard layout via kscreen-doctor."
+      kscreen-doctor \
+        output."$MAIN_SCREEN".enable \
+        output."$MAIN_SCREEN".rotation."$MAIN_ROTATION" \
+        output."$LOWER_SCREEN".enable \
+        output."$LOWER_SCREEN".rotation."$LOWER_ROTATION" \
+        output."$LOWER_SCREEN".disable
+    else
+      log "Applying detached keyboard layout via kscreen-doctor."
+      kscreen-doctor \
+        output."$MAIN_SCREEN".enable \
+        output."$MAIN_SCREEN".rotation."$MAIN_ROTATION" \
+        output."$LOWER_SCREEN".enable \
+        output."$LOWER_SCREEN".rotation."$LOWER_ROTATION"
+    fi
+  else
+    if [[ "$mode" == "attached" ]]; then
+      xrandr --output "$MAIN_SCREEN" --auto --rotate "$MAIN_ROTATION"
+      xrandr --output "$LOWER_SCREEN" --auto --rotate "$LOWER_ROTATION"
+      xrandr --output "$LOWER_SCREEN" --off
+    else
+      xrandr --output "$MAIN_SCREEN" --auto --rotate "$MAIN_ROTATION"
+      xrandr --output "$LOWER_SCREEN" --auto --rotate "$LOWER_ROTATION"
+    fi
+  fi
+
+  move_windows_to_main
 }
 
-function duo-watch-monitor() {
-    while true; do
-        echo "$(date) - MONITOR - Waiting for USB event"
-        inotifywait -e attrib /dev/bus/usb/*/ >/dev/null 2>&1
-        duo-check-monitor
-    done
+show_status() {
+  if keyboard_attached; then
+    log "Keyboard state: attached"
+  else
+    log "Keyboard state: detached"
+  fi
+  log "Main screen: $MAIN_SCREEN rotation=$MAIN_ROTATION"
+  log "Lower screen: $LOWER_SCREEN rotation=$LOWER_ROTATION"
+  log "Backlight target: ${BACKLIGHT_LEVEL_PERCENT}%"
 }
 
-function duo-cli() {
-    . /tmp/duo/status
-    case "${1}" in
-    pre|hibernate|shutdown)
-        echo "$(date) - ACPI - $@"
-        duo-set-kb-backlight 0
-    ;;
-    post|thaw|boot)
-        echo "$(date) - ACPI - $@"
-        duo-set-kb-backlight ${DEFAULT_BACKLIGHT}
-        duo-check-monitor
-    ;;
-    kbb)
-        echo "$(date) - KEYBOARD - Backlight = ${2}"
-        duo-set-kb-backlight ${2}
-    ;;
-    left-up)
-        echo "$(date) - ROTATE - Left-up"
-        if [ ${KEYBOARD_ATTACHED} = true ]; then
-            gdctl set --logical-monitor --primary --scale ${SCALE} --monitor eDP-1 --transform 90
-        else
-            gdctl set --logical-monitor --primary --scale ${SCALE} --monitor eDP-1 --transform 90 --logical-monitor --scale ${SCALE} --monitor eDP-2 --left-of eDP-1 --transform 90
-        fi
+usage() {
+  cat <<EOF
+Usage: $0 <action> [options]
 
-        ;;
-    right-up)
-        echo "$(date) - ROTATE - Right-up"
-        if [ ${KEYBOARD_ATTACHED} = true ]; then
-            gdctl set --logical-monitor --primary --scale ${SCALE} --monitor eDP-1 --transform 270
-        else
-            gdctl set --logical-monitor --primary --scale ${SCALE} --monitor eDP-1 --transform 270 --logical-monitor --scale ${SCALE} --monitor eDP-2 --right-of eDP-1 --transform 270
-        fi
-        ;;
-    bottom-up)
-        echo "$(date) - ROTATE - Bottom-up"
-        if [ ${KEYBOARD_ATTACHED} = true ]; then
-            gdctl set --logical-monitor --primary --scale ${SCALE} --monitor eDP-1 --transform 180
-        else
-            gdctl set --logical-monitor --primary --scale ${SCALE} --monitor eDP-1 --transform 180 --logical-monitor --scale ${SCALE} --monitor eDP-2 --above eDP-1 --transform 180
-        fi
-        ;;
-    normal)
-        echo "$(date) - ROTATE - Normal"
-        if [ ${KEYBOARD_ATTACHED} = true ]; then
-            gdctl set --logical-monitor --primary --scale ${SCALE} --monitor eDP-1
-        else
-            gdctl set --logical-monitor --primary --scale ${SCALE} --monitor eDP-1 --logical-monitor --scale ${SCALE} --monitor eDP-2 --below eDP-1
-        fi
-        ;;
+Actions:
+  apply           Apply full configuration for current keyboard state
+  display [auto|attached|detached]
+                  Apply display layout for attached/detached keyboard mode
+  rotate <main|lower|both> <rotation>
+                  Set the configured rotation values
+  light           Set keyboard backlight level to configured percent
+  power           Apply power profile based on AC/battery state
+  lid             Suspend on AC or hibernate on battery when lid closes
+  status          Show current keyboard and screen state
+  help            Show this help text
+
+Supported rotations: ${SUPPORTED_ROTATIONS[*]}
+EOF
+}
+
+main() {
+  load_config
+
+  case "${1:-apply}" in
+    apply)
+      set_keyboard_backlight "$BACKLIGHT_LEVEL_PERCENT"
+      set_power_profile
+      apply_display_layout auto
+      ;;
+    display)
+      apply_display_layout "${2:-auto}"
+      ;;
+    rotate)
+      local target="${2:-both}"
+      local rotation="${3:-}"
+      if [[ -z "$rotation" ]]; then
+        log "Rotation value missing."
+        usage
+        exit 1
+      fi
+      if ! valid_rotation "$rotation"; then
+        log "Invalid rotation: $rotation"
+        usage
+        exit 1
+      fi
+      if [[ "$target" == "main" || "$target" == "both" ]]; then
+        MAIN_ROTATION="$rotation"
+      fi
+      if [[ "$target" == "lower" || "$target" == "both" ]]; then
+        LOWER_ROTATION="$rotation"
+      fi
+      log "Rotation updated: main=$MAIN_ROTATION lower=$LOWER_ROTATION"
+      apply_display_layout auto
+      ;;
+    light)
+      set_keyboard_backlight "$BACKLIGHT_LEVEL_PERCENT"
+      ;;
+    power)
+      set_power_profile
+      ;;
+    lid)
+      lid_close_action
+      ;;
+    status)
+      show_status
+      ;;
+    help|--help|-h)
+      usage
+      ;;
     *)
-        echo "$(date) - UNKNOWN - $@"
-        ;;
-    esac
+      log "Unknown action: ${1:-}"
+      usage
+      exit 1
+      ;;
+  esac
 }
 
-function duo-watch-rotate() {
-    echo "$(date) - ROTATE - Watching"
-    monitor-sensor --accel |
-        stdbuf -oL grep "Accelerometer orientation changed:" |
-        stdbuf -oL awk '{print $4}' |
-        xargs -I '{}' stdbuf -oL "$0" '{}' 2>/dev/null
-}
-
-function main() {
-    duo-set-kb-backlight ${DEFAULT_BACKLIGHT}
-    duo-check-monitor
-    duo-watch-monitor &
-    duo-watch-rotate &
-    duo-watch-display-backlight &
-    duo-watch-wifi &
-    duo-watch-bluetooth
-}
-
-if [ -z "${1}" ]; then
-    main | tee -a /tmp/duo/duo.log
-else
-    duo-cli $@ | tee -a /tmp/duo/duo.log
-    if [ "${USER}" = root ]; then
-        chmod a+w /tmp/duo /tmp/duo/duo.log /tmp/duo/status
-    fi
-fi
+main "$@"
+''

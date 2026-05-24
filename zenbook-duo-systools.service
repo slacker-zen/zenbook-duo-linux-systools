@@ -1,0 +1,13 @@
+[Unit]
+Description=Zenbook Duo system tools
+Documentation=man:zenbook-duo-systools(1)
+After=multi-user.target
+ConditionPathExists=/usr/bin/zenbook-duo-systools
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/zenbook-duo-systools power
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

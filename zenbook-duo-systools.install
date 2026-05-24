@@ -1,0 +1,11 @@
+post_install() {
+  if [[ "${1:-}" == "install" || "${1:-}" == "upgrade" ]]; then
+    cat <<'EOFF'
+Zenbook Duo system tools installed.
+Enable the system power profile service:
+  sudo systemctl enable --now zenbook-duo-systools.service
+Enable the user session service for display and backlight automation:
+  systemctl --user enable --now zenbook-duo-systools-user.service
+EOFF
+  fi
+}

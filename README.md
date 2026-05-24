@@ -1,45 +1,104 @@
-# Linux for the ASUS Zenbook Duo
+# zenbook-duo-systools
 
-A script to manage features on the Zenbook Duo.
+A small Arch package and helper script for ASUS Zenbook Duo devices.
 
-## Functionality Status
+This repository contains:
 
-| Feature | Working | Not Working |
-|---------|:-------:|:-----------:|
-| Toggle bottom screen on when keyboard removed | ✅ | |
-| Toggle bottom screen off when keyboard placed on | ✅ | |
-| Toggle bluetooth on when keyboard removed | ✅ | |
-| Toggle bluetooth off when keyboard placed on (if bluetooth was off when removed) | ✅ | |
-| Screen brightness sync | ✅ | |
-| Reset Airplane mode when keyboard removed/placed (handles issue where Ubuntu toggles it on/off) | ✅ | |
-| Keyboard backlight set on boot and/or keyboard placed | ✅ | |
-| Checks for correct state on boot/resume (from suspend and hibernate)| ✅ | |
-| Auto rotation | ✅ | |
-| Keyboard backlight when keyboard off | | ❌ |
-| Keyboard function keys (some work in BT mode) | | ❌ |
+- `src/duo.sh` — the main helper script.
+- `src/duo.conf` — default configuration for screen IDs and rotation.
+- Systemd service units and a system-sleep hook for automatic behavior.
+- `PKGBUILD` for building the Arch package.
 
-## Tested on
+## Purpose
 
-The following models and operating systems have been validated by users
+The helper script manages Zenbook Duo display behavior, keyboard backlight, and power profile behavior based on keyboard attachment and AC/battery state.
 
-- **Models**
-    - 2025 Zenbook Duo (UX8406CA)
+## Actions
 
-- **Distros**
-    - Ubunutu 25.10
+### `apply`
 
-While I typicaly recommend Debian installs, and many items worked out of the box with `debian-backports`, Ubuntu 25.10 has so far proven to be the best option for compatibility of newer hardware, such as the Bluetooth module. Once Backports incorporates kernel 6.14, I may personally redo testing in Debian Bookworm.
+Runs the full configured workflow:
 
-## Install
+- Sets keyboard backlight to the configured percent.
+- Applies the correct power profile for AC or battery.
+- Detects whether the keyboard is attached and applies the matching display layout.
 
-Run the setup script below, choose a default keyboard backlight level of 0 (off) to 3 (high), and a default resolution scale.
+### `display [auto|attached|detached]`
 
-```bash
-$ ./setup.sh 
-What would you like to use for the default keyboard backlight brightness [0-3]? 1
-What would you like to use for monitor scale (1 = 100%, 1.5 = 150%, 2=200%) [1-2]? 1
-...
-<watch it install>
-```
+Applies the display layout for the selected mode.
 
-This will set up the required systemd scripts to handle all the above functionality. A log file will be created in `/tmp/duo/` when the services are running.
+- `auto` detects keyboard attachment and chooses `attached` or `detached` automatically.
+- `attached` enables the main display and turns off the lower screen.
+- `detached` enables both the main and lower screens.
+
+### `rotate <main|lower|both> <rotation>`
+
+Updates the configured rotation values and reapplies the display layout.
+
+- `main` changes rotation for `eDP-1`.
+- `lower` changes rotation for `eDP-2`.
+- `both` changes both screens.
+
+Supported rotations:
+
+- `normal`
+- `left`
+- `right`
+- `inverted`
+
+### `light`
+
+Sets the keyboard backlight brightness according to the configured percent.
+
+### `power`
+
+Selects the power profile based on current AC/battery state.
+
+- `performance` when on AC power.
+- `balanced` (or `power-saver` fallback) when on battery.
+
+### `lid`
+
+Handles lid close behavior:
+
+- Suspends when on AC power.
+- Hibernates when on battery.
+
+### `status`
+
+Displays the current keyboard state and configured screen setup.
+
+### `help`
+
+Shows the usage help text.
+
+## Configuration
+
+The default configuration lives in `/etc/zenbook-duo/duo.conf`.
+
+Defaults:
+
+- `MAIN_SCREEN="eDP-1"`
+- `LOWER_SCREEN="eDP-2"`
+- `MAIN_ROTATION="normal"`
+- `LOWER_ROTATION="normal"`
+- `KEYBOARD_MATCH="Keyboard|ASUS|ASUSTeK|AT Translated Set 2 keyboard"`
+- `BACKLIGHT_LEVEL_PERCENT=50`
+
+## Systemd integration
+
+This repo includes:
+
+- `src/zenbook-duo-systools.service` — system service for power profile management.
+- `src/zenbook-duo-systools-user.service` — user service for display and backlight automation.
+- `src/zenbook-duo-systools.sleep` — system-sleep hook that reapplies settings after resume.
+
+## Building
+
+Build the package with `makepkg -f` from the repository root.
+
+## Notes
+
+- The script prefers `kscreen-doctor` if available, and falls back to `xrandr`.
+- Window repositioning uses `wmctrl` and `xrandr` when available.
+- The package installs a sudoers policy for keyboard brightness control.
