@@ -1,5 +1,5 @@
 [Unit]
-Description=Zenbook Duo user session tools
+Description=Zenbook Duo user-session display tools
 After=default.target
 ConditionPathExists=/usr/bin/zenbook-duo-systools
 

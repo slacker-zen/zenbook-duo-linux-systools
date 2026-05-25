@@ -1,3 +1,0 @@
-# Allow zenbook-duo-systools to write keyboard backlight brightness without a password.
-Cmnd_Alias ZENBOOK_DUO_BRIGHTNESS = /usr/bin/tee /sys/class/leds/*/brightness
-ALL ALL=(root) NOPASSWD: ZENBOOK_DUO_BRIGHTNESS

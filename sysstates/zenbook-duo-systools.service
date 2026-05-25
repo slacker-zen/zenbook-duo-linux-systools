@@ -1,6 +1,5 @@
 [Unit]
-Description=Zenbook Duo system tools
-Documentation=man:zenbook-duo-systools(1)
+Description=Zenbook Duo system power tools
 After=multi-user.target
 ConditionPathExists=/usr/bin/zenbook-duo-systools
 

@@ -1,104 +1,121 @@
-# zenbook-duo-systools
+# zenbook-duo-linux-systools
 
-A small Arch package and helper script for ASUS Zenbook Duo devices.
+This repository contains pure source code for ASUS Zenbook Duo helpers, separated into two clean directories:
 
-This repository contains:
+- `sysstates/` — core system state helper scripts for display layout, backlight, and power-profile behavior.
+- `fnkeys/` — optional Fn-key and keyboard attachment helper with an install helper script.
 
-- `src/duo.sh` — the main helper script.
-- `src/duo.conf` — default configuration for screen IDs and rotation.
-- Systemd service units and a system-sleep hook for automatic behavior.
-- `PKGBUILD` for building the Arch package.
+## Versions
 
-## Purpose
+- `sysstates`: `0.9`
+- `fnkeys`: `0.9`
 
-The helper script manages Zenbook Duo display behavior, keyboard backlight, and power profile behavior based on keyboard attachment and AC/battery state.
+## Directory layout
 
-## Actions
+### `sysstates/`
 
-### `apply`
+Contains:
 
-Runs the full configured workflow:
+- `duo-sysstates.sh` — main helper script for display layouts, keyboard detection, backlight control, and power profile management.
+- `duo-sysstates.conf` — default configuration for screens, rotations, keyboard matching, and backlight level.
+- `setup-sysstates.sh` — installer for the core helper, config, sudoers policy, services, sleep hook, and prerequisites.
+- `zenbook-duo-systools.service` — optional systemd service unit for power profile automation.
+- `zenbook-duo-systools-user.service` — optional user service unit for display and backlight automation.
+- `zenbook-duo-systools.sleep` — optional system-sleep hook to reapply settings after resume.
+- `sudoers-zenbook-duo-systools` — sudoers helper config for safe backlight control.
 
-- Sets keyboard backlight to the configured percent.
-- Applies the correct power profile for AC or battery.
-- Detects whether the keyboard is attached and applies the matching display layout.
+### `fnkeys/`
 
-### `display [auto|attached|detached]`
+Contains:
 
-Applies the display layout for the selected mode.
+- `duo-fnkeys.sh` — Fn-key helper script for keyboard attachment detection and backlight handling.
+- `fnkeys.conf` — standalone Fn-key helper configuration.
+- `zenbook-duo-systools-fnkeys.service` — optional user service unit for Fn-key, USB, and Bluetooth keyboard events.
+- `setup-fnkeys.sh` — optional prerequisite installer for the Fn-key helper.
+- `sudoers-zenbook-duo-systools-fnkeys` — sudoers helper config for Fn-key backlight control.
 
-- `auto` detects keyboard attachment and chooses `attached` or `detached` automatically.
-- `attached` enables the main display and turns off the lower screen.
-- `detached` enables both the main and lower screens.
+## Runtime Boundary
 
-### `rotate <main|lower|both> <rotation>`
+Both helpers follow the same rule:
 
-Updates the configured rotation values and reapplies the display layout.
+- installation, configuration, sudoers policy, and shared helper binaries are system-wide
+- power and sleep behavior are system-level
+- KDE/Wayland display layout, notifications, and keyboard-session behavior run as user services
 
-- `main` changes rotation for `eDP-1`.
-- `lower` changes rotation for `eDP-2`.
-- `both` changes both screens.
+This split is intentional. KDE/Wayland display control belongs to the active logged-in session, while privileged writes are limited to the installed sudoers policies.
 
-Supported rotations:
+## Usage
 
-- `normal`
-- `left`
-- `right`
-- `inverted`
+### Run the core helper
 
-### `light`
+From the `sysstates/` directory:
 
-Sets the keyboard backlight brightness according to the configured percent.
+```bash
+cd sysstates
+./duo-sysstates.sh apply
+```
 
-### `power`
+The script supports subcommands such as `display`, `rotate`, `light`, `power`, `lid`, `status`, `version`, and `help`.
 
-Selects the power profile based on current AC/battery state.
+### Install the core helper
 
-- `performance` when on AC power.
-- `balanced` (or `power-saver` fallback) when on battery.
+From `sysstates/`:
 
-### `lid`
+```bash
+cd sysstates
+./setup-sysstates.sh
+```
 
-Handles lid close behavior:
+This installs `/usr/bin/zenbook-duo-systools`, `/etc/zenbook-duo/duo-sysstates.conf`, sudoers rules, systemd units, the sleep hook, and required packages.
 
-- Suspends when on AC power.
-- Hibernates when on battery.
+### Run the Fn-key helper
 
-### `status`
+From the `fnkeys/` directory:
 
-Displays the current keyboard state and configured screen setup.
+```bash
+cd fnkeys
+./duo-fnkeys.sh
+```
 
-### `help`
+### Install Fn-key prerequisites
 
-Shows the usage help text.
+From `fnkeys/`:
+
+```bash
+cd fnkeys
+./setup-fnkeys.sh
+```
+
+This installs `/usr/bin/zenbook-duo-systools-fnkeys`, `/etc/zenbook-duo/fnkeys.conf`, the USB backlight helper, sudoers rules, the user service unit, and required packages.
 
 ## Configuration
 
-The default configuration lives in `/etc/zenbook-duo/duo.conf`.
+The helpers are intentionally independent and use separate configs:
 
-Defaults:
+- `sysstates/duo-sysstates.conf` installs to `/etc/zenbook-duo/duo-sysstates.conf`
+- `fnkeys/fnkeys.conf` installs to `/etc/zenbook-duo/fnkeys.conf`
 
-- `MAIN_SCREEN="eDP-1"`
-- `LOWER_SCREEN="eDP-2"`
-- `MAIN_ROTATION="normal"`
-- `LOWER_ROTATION="normal"`
-- `KEYBOARD_MATCH="Keyboard|ASUS|ASUSTeK|AT Translated Set 2 keyboard"`
-- `BACKLIGHT_LEVEL_PERCENT=50`
+Edit `duo-sysstates.conf` to adjust:
 
-## Systemd integration
+- main and lower screen names
+- display rotation values
+- keyboard match pattern
+- Bluetooth keyboard fallback
+- keyboard backlight percentage (`0-100`)
+- X11-only window moving compatibility
 
-This repo includes:
+Edit `fnkeys.conf` to adjust:
 
-- `src/zenbook-duo-systools.service` — system service for power profile management.
-- `src/zenbook-duo-systools-user.service` — user service for display and backlight automation.
-- `src/zenbook-duo-systools.sleep` — system-sleep hook that reapplies settings after resume.
-
-## Building
-
-Build the package with `makepkg -f` from the repository root.
+- main and lower screen names for `kscreen-doctor` or `gdctl`
+- monitor scale
+- KDE lower-display position
+- feature ownership toggles for display, Wi-Fi, Bluetooth, and display-backlight sync
+- main and lower backlight sysfs paths
+- keyboard match pattern
+- Bluetooth keyboard fallback
+- detachable keyboard backlight level (`0-3`)
 
 ## Notes
 
-- The script prefers `kscreen-doctor` if available, and falls back to `xrandr`.
-- Window repositioning uses `wmctrl` and `xrandr` when available.
-- The package installs a sudoers policy for keyboard brightness control.
+The helpers are independent. You can install either helper on its own.
+The setup scripts are tuned for Arch-like KDE Plasma Wayland systems such as CachyOS, using `kscreen-doctor` for display layout and `bluetoothctl` as the user-service keyboard detection fallback.

@@ -1,0 +1,5 @@
+# Allow zenbook-duo-systools to write keyboard backlight brightness and manage power profiles without a password.
+Cmnd_Alias ZENBOOK_DUO_BRIGHTNESS = /usr/bin/tee /sys/class/leds/*/brightness
+Cmnd_Alias ZENBOOK_DUO_POWERPROFILES = /usr/bin/powerprofilesctl set performance, /usr/bin/powerprofilesctl set balanced, /usr/bin/powerprofilesctl set power-saver
+Cmnd_Alias ZENBOOK_DUO_SLEEP = /usr/bin/systemctl suspend, /usr/bin/systemctl hibernate
+ALL ALL=(root) NOPASSWD: ZENBOOK_DUO_BRIGHTNESS, ZENBOOK_DUO_POWERPROFILES, ZENBOOK_DUO_SLEEP
