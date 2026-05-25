@@ -1,0 +1,44 @@
+pkgbase = zenbook-duo-linux-systools
+	pkgdesc = ASUS Zenbook Duo helpers for Arch-based KDE Plasma Wayland systems
+	pkgver = 0.9
+	pkgrel = 1
+	url = https://github.com/nekropolit/zenbook-duo-linux-systools
+	arch = any
+	license = MIT
+
+pkgname = zenbook-duo-systools
+	pkgdesc = ASUS Zenbook Duo system-state helper
+	install = sysstates/zenbook-duo-systools.install
+	depends = bash
+	depends = bluez-utils
+	depends = kscreen
+	depends = libinput
+	depends = power-profiles-daemon
+	depends = sudo
+	depends = systemd
+	provides = zenbook-duo-linux-systools-sysstates=0.9
+	conflicts = zenbook-duo-linux-systools-sysstates
+	replaces = zenbook-duo-linux-systools-sysstates
+	backup = etc/zenbook-duo/duo-sysstates.conf
+	backup = etc/sudoers.d/zenbook-duo-systools
+
+pkgname = zenbook-duo-systools-fnkeys
+	pkgdesc = ASUS Zenbook Duo Fn-key and detachable keyboard helper
+	install = fnkeys/zenbook-duo-systools-fnkeys.install
+	depends = bash
+	depends = bluez-utils
+	depends = glib2
+	depends = inotify-tools
+	depends = kscreen
+	depends = libinput
+	depends = libnotify
+	depends = networkmanager
+	depends = python-pyusb
+	depends = sudo
+	depends = systemd
+	depends = usbutils
+	provides = zenbook-duo-linux-systools-fnkeys=0.9
+	conflicts = zenbook-duo-linux-systools-fnkeys
+	replaces = zenbook-duo-linux-systools-fnkeys
+	backup = etc/zenbook-duo/fnkeys.conf
+	backup = etc/sudoers.d/zenbook-duo-systools-fnkeys

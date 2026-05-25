@@ -1,0 +1,28 @@
+_cleanup_old_fnkeys_units() {
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl --global disable zenbook-duo-systools-fnkeys.service >/dev/null 2>&1 || true
+    systemctl daemon-reload >/dev/null 2>&1 || true
+  fi
+}
+
+pre_install() {
+  _cleanup_old_fnkeys_units
+}
+
+pre_upgrade() {
+  _cleanup_old_fnkeys_units
+}
+
+post_install() {
+  cat <<'EOF'
+zenbook-duo-systools-fnkeys 0.9 installed.
+
+Enable the user-session Fn-key helper:
+  systemctl --user daemon-reload
+  systemctl --user enable --now zenbook-duo-systools-fnkeys.service
+EOF
+}
+
+post_upgrade() {
+  post_install
+}

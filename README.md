@@ -48,6 +48,21 @@ This split is intentional. KDE/Wayland display control belongs to the active log
 
 ## Usage
 
+### Build packages
+
+From the repository root:
+
+```bash
+makepkg -f
+```
+
+This builds:
+
+- `zenbook-duo-systools`
+- `zenbook-duo-systools-fnkeys`
+
+The package metadata declares conflicts and replacements for earlier split package names. The install scripts remove old hand-made `duo` service entries before installing the packaged helpers.
+
 ### Run the core helper
 
 From the `sysstates/` directory:

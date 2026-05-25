@@ -34,7 +34,7 @@ if [[ "${DEV_MODE}" == false ]]; then
     sudo pacman -Sy --needed --noconfirm "${PACKAGES[@]}"
     sudo install -Dm755 "${SCRIPT_DIR}/duo-fnkeys.sh" "${INSTALL_LOCATION}"
     sudo install -Dm644 "${SCRIPT_DIR}/fnkeys.conf" "${CONFIG_LOCATION}"
-    sudo "${INSTALL_LOCATION}" install-backlight-helper
+    sudo install -Dm755 "${SCRIPT_DIR}/backlight.py" /usr/lib/zenbook-duo-fnkeys/backlight.py
 fi
 
 if [[ "${DEV_MODE}" == false ]]; then

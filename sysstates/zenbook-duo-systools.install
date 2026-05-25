@@ -1,0 +1,46 @@
+_cleanup_old_duo_units() {
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl disable --now zenbook-duo.service >/dev/null 2>&1 || true
+    systemctl --global disable zenbook-duo-user.service >/dev/null 2>&1 || true
+    systemctl daemon-reload >/dev/null 2>&1 || true
+  fi
+
+  rm -f \
+    /etc/systemd/system/zenbook-duo.service \
+    /etc/systemd/user/zenbook-duo-user.service \
+    /usr/local/bin/duo \
+    /usr/lib/systemd/system-sleep/duo \
+    /etc/sudoers.d/zenbook-duo
+}
+
+pre_install() {
+  _cleanup_old_duo_units
+}
+
+pre_upgrade() {
+  _cleanup_old_duo_units
+}
+
+post_install() {
+  cat <<'EOF'
+zenbook-duo-systools 0.9 installed.
+
+Enable the system power-profile service:
+  sudo systemctl enable --now zenbook-duo-systools.service
+
+Enable the user-session display service:
+  systemctl --user daemon-reload
+  systemctl --user enable --now zenbook-duo-systools-user.service
+EOF
+}
+
+post_upgrade() {
+  post_install
+}
+
+pre_remove() {
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl disable --now zenbook-duo-systools.service >/dev/null 2>&1 || true
+    systemctl daemon-reload >/dev/null 2>&1 || true
+  fi
+}
