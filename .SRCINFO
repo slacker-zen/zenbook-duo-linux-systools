@@ -1,7 +1,7 @@
 pkgbase = zenbook-duo-linux-systools
 	pkgdesc = ASUS Zenbook Duo helpers for Arch-based KDE Plasma Wayland systems
 	pkgver = 0.9
-	pkgrel = 1
+	pkgrel = 2
 	url = https://github.com/nekropolit/zenbook-duo-linux-systools
 	arch = any
 	license = MIT

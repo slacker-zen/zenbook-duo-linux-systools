@@ -21,6 +21,7 @@ KEYBOARD_MATCH="Keyboard|ASUS|ASUSTeK|AT Translated Set 2 keyboard"
 KEYBOARD_BT_MAC="E9:C7:F1:96:05:3C"
 KEYBOARD_BT_NAME="ASUS Zenbook Duo Keyboard"
 BACKLIGHT_LEVEL_PERCENT=50
+MANAGE_DISPLAY_LAYOUT=false
 MOVE_WINDOWS_TO_MAIN=false
 
 SUPPORTED_ROTATIONS=(normal left right inverted)
@@ -297,7 +298,11 @@ main() {
     apply)
       set_keyboard_backlight "$BACKLIGHT_LEVEL_PERCENT"
       set_power_profile
-      apply_display_layout auto
+      if [[ "${MANAGE_DISPLAY_LAYOUT}" == true ]]; then
+        apply_display_layout auto
+      else
+        log "Display layout management disabled."
+      fi
       ;;
     display)
       apply_display_layout "${2:-auto}"

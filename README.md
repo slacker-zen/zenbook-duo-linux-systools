@@ -119,6 +119,7 @@ Edit `duo-sysstates.conf` to adjust:
 - keyboard match pattern
 - Bluetooth keyboard fallback
 - keyboard backlight percentage (`0-100`)
+- opt-in display attach/detach layout switching
 - X11-only window moving compatibility
 
 Edit `fnkeys.conf` to adjust:
