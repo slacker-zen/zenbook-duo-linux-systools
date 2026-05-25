@@ -1,0 +1,3 @@
+[submodule "asus-zenbookduo"]
+	path = asus-zenbookduo
+	url = https://github.com/mytikfy/asus-zenbookduo
