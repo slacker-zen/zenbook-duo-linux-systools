@@ -39,6 +39,8 @@ LOWER_POSITION="${FNKEYS_LOWER_POSITION:-$DEFAULT_LOWER_POSITION}"
 MANAGE_DISPLAY="${FNKEYS_MANAGE_DISPLAY:-true}"
 MANAGE_WIFI="${FNKEYS_MANAGE_WIFI:-false}"
 MANAGE_BLUETOOTH="${FNKEYS_MANAGE_BLUETOOTH:-false}"
+KEEP_BLUETOOTH_ON_WHEN_ATTACHED="${FNKEYS_KEEP_BLUETOOTH_ON_WHEN_ATTACHED:-true}"
+RESPECT_BLUETOOTH_FORCED_OFF="${FNKEYS_RESPECT_BLUETOOTH_FORCED_OFF:-true}"
 SYNC_DISPLAY_BACKLIGHT="${FNKEYS_SYNC_DISPLAY_BACKLIGHT:-false}"
 REFRESH_PLASMA_ON_LAYOUT="${FNKEYS_REFRESH_PLASMA_ON_LAYOUT:-false}"
 RESTART_PLASMA_ON_ATTACH="${FNKEYS_RESTART_PLASMA_ON_ATTACH:-false}"
@@ -161,6 +163,11 @@ function duo-has-keyboard-bluetooth() {
   "${BLUETOOTHCTL}" info "${mac}" 2>/dev/null | grep -q "Connected: yes"
 }
 
+function duo-bluetooth-forced-off() {
+  [[ "${RESPECT_BLUETOOTH_FORCED_OFF}" == true ]] || return 1
+  [[ "$(rfkill -n -o SOFT list bluetooth 2>/dev/null | head -n1 || true)" == "blocked" ]]
+}
+
 function duo-usb-device-matches-dock-path() {
   local device="$1"
   local product="" manufacturer="" vendor="" product_id="" devpath="" haystack=""
@@ -191,6 +198,15 @@ function duo-has-keyboard-attached() {
   done
 
   return 1
+}
+
+function duo-unblock-bluetooth-if-allowed() {
+  if duo-bluetooth-forced-off; then
+    echo "$(date) - NETWORK - Bluetooth is blocked by user; using dock USB fallback only."
+    return 0
+  fi
+
+  rfkill unblock bluetooth >/dev/null 2>&1 || true
 }
 
 function duo-set-status() {
@@ -408,8 +424,10 @@ function duo-check-monitor() {
       nmcli radio wifi on 2>/dev/null || true
     fi
     if [[ "${MANAGE_BLUETOOTH}" == true ]]; then
-      if [[ "${BLUETOOTH_BEFORE}" == "unblocked" ]]; then
-        rfkill unblock bluetooth >/dev/null 2>&1 || true
+      if [[ "${KEEP_BLUETOOTH_ON_WHEN_ATTACHED}" == true ]]; then
+        duo-unblock-bluetooth-if-allowed
+      elif [[ "${BLUETOOTH_BEFORE}" == "unblocked" ]]; then
+        duo-unblock-bluetooth-if-allowed
       else
         rfkill block bluetooth >/dev/null 2>&1 || true
       fi
@@ -423,7 +441,7 @@ function duo-check-monitor() {
       nmcli radio wifi on 2>/dev/null || true
     fi
     if [[ "${MANAGE_BLUETOOTH}" == true ]]; then
-      rfkill unblock bluetooth >/dev/null 2>&1 || true
+      duo-unblock-bluetooth-if-allowed
     fi
     if [[ -n "${NOTIFY_SEND}" ]]; then
       ${NOTIFY_SEND} -a "Zenbook Duo" -t 1000 --hint=int:transient:1 -i "preferences-desktop-display" "Keyboard detached: applying detached display layout"

@@ -48,7 +48,7 @@ if [[ "${DEV_MODE}" == false ]]; then
         echo "Note: neither kscreen-doctor nor gdctl was found. Install one if you want fnkeys to switch display layouts."
     fi
     if ! command -v bluetoothctl >/dev/null 2>&1; then
-        echo "Note: bluetoothctl was not found. Bluetooth keyboard detection will rely on libinput or USB only."
+        echo "Note: bluetoothctl was not found. Bluetooth reconnect/Fn-key transport events cannot be watched."
     fi
     if [[ "${XDG_CURRENT_DESKTOP:-}" != *KDE* ]]; then
         echo "Note: current desktop is '${XDG_CURRENT_DESKTOP:-unknown}'. This setup is tuned for KDE Plasma Wayland, with gdctl fallback."

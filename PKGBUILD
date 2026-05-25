@@ -3,7 +3,7 @@
 pkgbase=zenbook-duo-linux-systools
 pkgname=(zenbook-duo-systools zenbook-duo-systools-fnkeys)
 pkgver=1.0
-pkgrel=3
+pkgrel=5
 pkgdesc='ASUS Zenbook Duo helpers for Arch-based KDE Plasma Wayland systems'
 arch=(any)
 url='https://github.com/nekropolit/zenbook-duo-linux-systools'

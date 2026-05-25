@@ -137,11 +137,13 @@ Edit `fnkeys.conf` to adjust:
 - monitor scale
 - KDE lower-display position
 - feature ownership toggles for display, Wi-Fi, Bluetooth, and display-backlight sync
+- attached-mode Bluetooth preservation for Fn/media transport
+- forced-off Bluetooth handling, where dock USB becomes the only fallback
 - Plasma/KWin refresh behavior after display layout changes
 - Plasma panel/taskbar screen assignment for attached and detached modes
 - main and lower backlight sysfs paths
 - direct dock USB path and keyboard match pattern
-- Bluetooth keyboard identity for reconnect events
+- Bluetooth keyboard identity and attached-mode Bluetooth preservation for Fn/media transport
 - detachable keyboard backlight level (`0-3`)
 
 ## Notes
@@ -159,6 +161,8 @@ The top-row key behavior can change with the keyboard connection mode and BIOS F
 
 - when the keyboard is detached, `F1`, `F2`, and `F3` act as media keys: volume mute, volume down, and volume up
 - when the keyboard is detached, `Fn` + `F1`, `Fn` + `F2`, and so on act as real `F1`, `F2`, and so on
-- when the keyboard is directly attached on the dock connector, `F1` acts as real `F1`
+- when the keyboard is directly attached on the dock connector, the USB keyboard interface emits real `F1`, `F2`, and so on
+- when directly attached, the keyboard can still keep a Bluetooth connection for Fn/media transport, so the Fn-key helper keeps Bluetooth unblocked in attached mode by default
+- if the user explicitly blocks Bluetooth, the Fn-key helper respects that and falls back to dock USB only; in that mode the keyboard must be physically attached for regular function-key behavior
 
 Fn-lock settings in the BIOS can invert or normalize this behavior, so check that setting if the top row does not match the expected mode.
