@@ -2,10 +2,10 @@
 set -euo pipefail
 
 CONFIG_FILE="/etc/zenbook-duo/fnkeys.conf"
-HELPER_VERSION="1.0"
+HELPER_VERSION="1.1"
 TMP_DIR="/tmp/duo"
 BACKLIGHT_PY_SYSTEM="/usr/lib/zenbook-duo-fnkeys/backlight.py"
-DEFAULT_BACKLIGHT=1
+DEFAULT_BACKLIGHT=2
 DEFAULT_SCALE=1
 DEFAULT_MAIN_SCREEN="eDP-1"
 DEFAULT_LOWER_SCREEN="eDP-2"
@@ -15,6 +15,8 @@ DEFAULT_KEYBOARD_USB_MATCH="Primax|ASUS.*Keyboard|ASUSTeK.*Keyboard|Zenbook Duo.
 DEFAULT_KEYBOARD_DOCK_USB_PATH="3-6"
 DEFAULT_KEYBOARD_BT_MAC="E9:C7:F1:96:05:3C"
 DEFAULT_KEYBOARD_BT_NAME="ASUS Zenbook Duo Keyboard"
+DEFAULT_KEYBOARD_BT_ADAPTER="hci0"
+DEFAULT_KEYBOARD_BT_GATT_CHAR="service001b/char003b"
 DEFAULT_LOWER_POSITION="0,1200"
 
 mkdir -p "${TMP_DIR}"
@@ -35,6 +37,9 @@ KEYBOARD_USB_MATCH="${FNKEYS_KEYBOARD_USB_MATCH:-$DEFAULT_KEYBOARD_USB_MATCH}"
 KEYBOARD_DOCK_USB_PATH="${FNKEYS_KEYBOARD_DOCK_USB_PATH:-$DEFAULT_KEYBOARD_DOCK_USB_PATH}"
 KEYBOARD_BT_MAC="${FNKEYS_KEYBOARD_BT_MAC:-$DEFAULT_KEYBOARD_BT_MAC}"
 KEYBOARD_BT_NAME="${FNKEYS_KEYBOARD_BT_NAME:-$DEFAULT_KEYBOARD_BT_NAME}"
+KEYBOARD_BT_ADAPTER="${FNKEYS_KEYBOARD_BT_ADAPTER:-$DEFAULT_KEYBOARD_BT_ADAPTER}"
+KEYBOARD_BT_GATT_CHAR="${FNKEYS_KEYBOARD_BT_GATT_CHAR:-$DEFAULT_KEYBOARD_BT_GATT_CHAR}"
+KEYBOARD_BT_CHAR_PATH="${FNKEYS_KEYBOARD_BT_CHAR_PATH:-}"
 LOWER_POSITION="${FNKEYS_LOWER_POSITION:-$DEFAULT_LOWER_POSITION}"
 MANAGE_DISPLAY="${FNKEYS_MANAGE_DISPLAY:-true}"
 MANAGE_WIFI="${FNKEYS_MANAGE_WIFI:-false}"
@@ -59,72 +64,48 @@ trap 'echo "Ctrl+C captured. Exiting..."; pkill -P $$; exit 1' INT
 function duo-write-backlight-script() {
   local dest="${1}"
   mkdir -p "$(dirname "${dest}")"
-  cat > "${dest}" <<'PY'
+  install -Dm755 "$(dirname "${BASH_SOURCE[0]}")/backlight.py" "${dest}" 2>/dev/null || cat > "${dest}" <<'PY'
 #!/usr/bin/env python3
 import os
+import subprocess
 import sys
+
 import usb.core
 import usb.util
 
-VENDOR_ID = int(os.environ.get('DUO_VENDOR_ID', '0'), 16)
-PRODUCT_ID = int(os.environ.get('DUO_PRODUCT_ID', '0'), 16)
 REPORT_ID = 0x5A
 WVALUE = 0x035A
 WINDEX = 4
 WLENGTH = 16
+PAYLOAD = (0xBA, 0xC5, 0xC4)
+BLUEZ_MAIN_CONF = '/etc/bluetooth/main.conf'
 
-if VENDOR_ID == 0 or PRODUCT_ID == 0:
-    print('Missing DUO_VENDOR_ID or DUO_PRODUCT_ID environment variables.')
-    sys.exit(1)
 
-if len(sys.argv) != 2:
-    print(f'Usage: {sys.argv[0]} <level>')
-    sys.exit(1)
-
-try:
-    level = int(sys.argv[1])
+def parse_level(value):
+    level = int(value)
     if level < 0 or level > 3:
         raise ValueError
-except ValueError:
-    print('Invalid level. Must be an integer between 0 and 3.')
-    sys.exit(1)
+    return level
 
-packet = [0] * WLENGTH
-packet[0] = REPORT_ID
-packet[1] = 0xBA
-packet[2] = 0xC5
-packet[3] = 0xC4
-packet[4] = level
 
-def find_device():
-    return usb.core.find(idVendor=VENDOR_ID, idProduct=PRODUCT_ID)
-
-def attach_kernel_driver(device):
+def set_usb_backlight(vendor_id, product_id, level):
+    packet = [0] * WLENGTH
+    packet[0] = REPORT_ID
+    packet[1:4] = PAYLOAD
+    packet[4] = level
+    dev = usb.core.find(idVendor=int(vendor_id, 16), idProduct=int(product_id, 16))
+    if dev is None:
+        sys.exit(1)
+    reattached = False
     try:
-        if device.is_kernel_driver_active(WINDEX):
-            device.detach_kernel_driver(WINDEX)
-            return True
+        if dev.is_kernel_driver_active(WINDEX):
+            dev.detach_kernel_driver(WINDEX)
+            reattached = True
     except Exception:
         pass
-    return False
-
-
-def main():
-    dev = find_device()
-    if dev is None:
-        print(f'Device not found (Vendor ID: 0x{VENDOR_ID:04X}, Product ID: 0x{PRODUCT_ID:04X})')
-        sys.exit(1)
-
-    reattached = attach_kernel_driver(dev)
     try:
         ret = dev.ctrl_transfer(0x21, 0x09, WVALUE, WINDEX, packet, timeout=1000)
-        if ret != WLENGTH:
-            print(f'Warning: Only {ret} bytes sent out of {WLENGTH}.')
-            sys.exit(1)
-        print('Data packet sent successfully.')
-    except usb.core.USBError as e:
-        print(f'Control transfer failed: {e}')
-        sys.exit(1)
+        sys.exit(0 if ret == WLENGTH else 1)
     finally:
         try:
             usb.util.release_interface(dev, WINDEX)
@@ -136,8 +117,59 @@ def main():
             except Exception:
                 pass
 
+
+def set_bluetooth_backlight(characteristic_path, level):
+    if not bluez_exports_claimed_services_read_write():
+        sys.exit(1)
+
+    write_value = ' '.join(f'0x{byte:02x}' for byte in (*PAYLOAD, level))
+    commands = (
+        f'gatt.select-attribute {characteristic_path}\n'
+        f'gatt.write "{write_value}"\n'
+        'quit\n'
+    )
+    result = subprocess.run(
+        ['bluetoothctl'],
+        check=False,
+        text=True,
+        input=commands,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    output = '\n'.join(part for part in (result.stdout.strip(), result.stderr.strip()) if part)
+    if result.returncode != 0 or 'Failed' in output or 'Error' in output or 'not available' in output:
+        sys.exit(result.returncode or 1)
+    sys.exit(0 if 'Attempting to write' in output else 1)
+
+
+def bluez_exports_claimed_services_read_write():
+    try:
+        with open(BLUEZ_MAIN_CONF, encoding='utf-8') as config:
+            in_gatt = False
+            for raw_line in config:
+                line = raw_line.strip()
+                if not line or line.startswith('#'):
+                    continue
+                if line.startswith('[') and line.endswith(']'):
+                    in_gatt = line.lower() == '[gatt]'
+                    continue
+                if in_gatt and line.lower().replace(' ', '') == 'exportclaimedservices=read-write':
+                    return True
+    except OSError:
+        return False
+    return False
+
+
 if __name__ == '__main__':
-    main()
+    if len(sys.argv) == 2:
+        vendor = os.environ.get('DUO_VENDOR_ID', '0')
+        product = os.environ.get('DUO_PRODUCT_ID', '0')
+        set_usb_backlight(vendor, product, parse_level(sys.argv[1]))
+    if len(sys.argv) == 5 and sys.argv[1] == 'usb':
+        set_usb_backlight(sys.argv[2], sys.argv[3], parse_level(sys.argv[4]))
+    if len(sys.argv) == 4 and sys.argv[1] == 'bluetooth':
+        set_bluetooth_backlight(sys.argv[2], parse_level(sys.argv[3]))
+    sys.exit(1)
 PY
   chmod a+x "${dest}"
 }
@@ -161,6 +193,20 @@ function duo-has-keyboard-bluetooth() {
   ' || true)
   [[ -n "${mac}" ]] || return 1
   "${BLUETOOTHCTL}" info "${mac}" 2>/dev/null | grep -q "Connected: yes"
+}
+
+function duo-keyboard-bluetooth-char-path() {
+  if [[ -n "${KEYBOARD_BT_CHAR_PATH}" ]]; then
+    printf '%s' "${KEYBOARD_BT_CHAR_PATH}"
+    return 0
+  fi
+
+  [[ -n "${KEYBOARD_BT_MAC}" ]] || return 1
+  [[ -n "${KEYBOARD_BT_ADAPTER}" ]] || return 1
+  [[ -n "${KEYBOARD_BT_GATT_CHAR}" ]] || return 1
+
+  local mac_path="${KEYBOARD_BT_MAC//:/_}"
+  printf '/org/bluez/%s/dev_%s/%s' "${KEYBOARD_BT_ADAPTER}" "${mac_path}" "${KEYBOARD_BT_GATT_CHAR}"
 }
 
 function duo-bluetooth-forced-off() {
@@ -209,6 +255,20 @@ function duo-unblock-bluetooth-if-allowed() {
   rfkill unblock bluetooth >/dev/null 2>&1 || true
 }
 
+function duo-notify-keyboard-mode() {
+  local mode="${1}"
+  local message="${2}"
+  local state_file="${TMP_DIR}/last-notified-keyboard-mode"
+  local last_mode=""
+
+  [[ -n "${NOTIFY_SEND}" ]] || return 0
+  [[ -r "${state_file}" ]] && last_mode="$(<"${state_file}")"
+  [[ "${last_mode}" != "${mode}" ]] || return 0
+
+  printf '%s' "${mode}" >"${state_file}"
+  ${NOTIFY_SEND} -a "Zenbook Duo" -t 1000 --hint=int:transient:1 -i "preferences-desktop-display" "${message}" || true
+}
+
 function duo-set-status() {
   cat > "${TMP_DIR}/status" <<EOF
 BLUETOOTH_BEFORE=${BLUETOOTH_BEFORE:-unblocked}
@@ -220,6 +280,14 @@ EOF
 
 function duo-ensure-backlight-script() {
   local path="${BACKLIGHT_PY_SYSTEM}"
+  local source_dir
+  source_dir="$(dirname "${BASH_SOURCE[0]}")"
+
+  if [[ -x "${source_dir}/backlight.py" ]]; then
+    printf '%s' "${source_dir}/backlight.py"
+    return
+  fi
+
   if [[ ! -x "${path}" ]]; then
     path="${TMP_DIR}/backlight.py"
     if [[ ! -f "${path}" ]]; then
@@ -272,15 +340,53 @@ function duo-set-kb-backlight() {
 
   local keyboard_id vendor product backlight_script
   keyboard_id=$(duo-find-keyboard-usb)
+  backlight_script=$(duo-ensure-backlight-script)
+
+  if [[ -n "${keyboard_id}" ]]; then
+    vendor=${keyboard_id%:*}
+    product=${keyboard_id#*:}
+    if sudo "${PYTHON3}" "${backlight_script}" usb "0x${vendor}" "0x${product}" "${target}" >/dev/null 2>&1; then
+      return 0
+    fi
+  fi
+
+  if duo-has-keyboard-bluetooth; then
+    local bt_char_path
+    bt_char_path="$(duo-keyboard-bluetooth-char-path || true)"
+    if [[ -n "${bt_char_path}" ]] && "${PYTHON3}" "${backlight_script}" bluetooth "${bt_char_path}" "${target}" >/dev/null 2>&1; then
+      return 0
+    fi
+  fi
+
   if [[ -z "${keyboard_id}" ]]; then
-    echo "No Zenbook Duo keyboard device found for USB backlight control."
+    echo "No Zenbook Duo keyboard device found for USB or Bluetooth backlight control."
+  else
+    echo "Zenbook Duo keyboard backlight control failed over USB and Bluetooth."
+  fi
+  return 1
+}
+
+function duo-set-kb-backlight-retry() {
+  local level="${1}"
+  local attempts="${2:-12}"
+  local delay="${3:-1}"
+  local lock_dir="${TMP_DIR}/kb-backlight-retry.lock"
+  local attempt
+
+  if ! mkdir "${lock_dir}" 2>/dev/null; then
     return 0
   fi
-  vendor=${keyboard_id%:*}
-  product=${keyboard_id#*:}
 
-  backlight_script=$(duo-ensure-backlight-script)
-  DUO_VENDOR_ID="0x${vendor}" DUO_PRODUCT_ID="0x${product}" sudo "${PYTHON3}" "${backlight_script}" "${target}" >/dev/null 2>&1
+  for ((attempt = 1; attempt <= attempts; attempt++)); do
+    if duo-set-kb-backlight "${level}"; then
+      rmdir "${lock_dir}" 2>/dev/null || true
+      return 0
+    fi
+    sleep "${delay}"
+  done
+
+  rmdir "${lock_dir}" 2>/dev/null || true
+  return 1
 }
 
 function duo-sync-display-backlight() {
@@ -418,7 +524,7 @@ function duo-check-monitor() {
   duo-set-status
 
   if [[ "${KEYBOARD_ATTACHED}" == true ]]; then
-    duo-set-kb-backlight "${BACKLIGHT_LEVEL}"
+    duo-set-kb-backlight "${BACKLIGHT_LEVEL}" || true
     duo-apply-display-layout attached
     if [[ "${MANAGE_WIFI}" == true && "${WIFI_BEFORE}" == "enabled" ]]; then
       nmcli radio wifi on 2>/dev/null || true
@@ -432,9 +538,7 @@ function duo-check-monitor() {
         rfkill block bluetooth >/dev/null 2>&1 || true
       fi
     fi
-    if [[ -n "${NOTIFY_SEND}" ]]; then
-      ${NOTIFY_SEND} -a "Zenbook Duo" -t 1000 --hint=int:transient:1 -i "preferences-desktop-display" "Keyboard attached: applying attached display layout"
-    fi
+    duo-notify-keyboard-mode attached "Keyboard attached: applying attached display layout"
   else
     duo-apply-display-layout detached
     if [[ "${MANAGE_WIFI}" == true ]]; then
@@ -443,9 +547,8 @@ function duo-check-monitor() {
     if [[ "${MANAGE_BLUETOOTH}" == true ]]; then
       duo-unblock-bluetooth-if-allowed
     fi
-    if [[ -n "${NOTIFY_SEND}" ]]; then
-      ${NOTIFY_SEND} -a "Zenbook Duo" -t 1000 --hint=int:transient:1 -i "preferences-desktop-display" "Keyboard detached: applying detached display layout"
-    fi
+    duo-set-kb-backlight-retry "${BACKLIGHT_LEVEL}" 12 1 &
+    duo-notify-keyboard-mode detached "Keyboard detached: applying detached display layout"
   fi
 }
 
@@ -501,6 +604,28 @@ function duo-watch-monitor() {
   fi
 }
 
+function duo-current-keyboard-mode() {
+  if duo-has-keyboard-attached; then
+    printf 'attached'
+  else
+    printf 'detached'
+  fi
+}
+
+function duo-watch-keyboard-state-poll() {
+  local last_mode current_mode
+
+  last_mode="$(duo-current-keyboard-mode)"
+  while true; do
+    sleep 2
+    current_mode="$(duo-current-keyboard-mode)"
+    if [[ "${current_mode}" != "${last_mode}" ]]; then
+      duo-check-monitor
+      last_mode="${current_mode}"
+    fi
+  done
+}
+
 function duo-watch-keyboard-bluetooth() {
   [[ -n "${BLUETOOTHCTL}" ]] || return 0
   if ! command -v gdbus >/dev/null 2>&1; then
@@ -516,10 +641,10 @@ function duo-watch-keyboard-bluetooth() {
 function duo-cli() {
   case "${1:-}" in
     pre|hibernate|shutdown)
-      duo-set-kb-backlight 0
+      duo-set-kb-backlight 0 || true
       ;;
     post|thaw|boot)
-      duo-set-kb-backlight "${BACKLIGHT_LEVEL}"
+      duo-set-kb-backlight "${BACKLIGHT_LEVEL}" || true
       duo-check-monitor
       ;;
     kbb)
@@ -566,9 +691,10 @@ function duo-cli() {
 }
 
 function main() {
-  duo-set-kb-backlight "${BACKLIGHT_LEVEL}"
+  duo-set-kb-backlight "${BACKLIGHT_LEVEL}" || true
   duo-check-monitor
   duo-watch-monitor &
+  duo-watch-keyboard-state-poll &
   duo-watch-keyboard-bluetooth &
   duo-watch-display-backlight &
   duo-watch-wifi &

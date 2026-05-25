@@ -10,7 +10,7 @@ These scripts are intended for Arch-based Linux distributions and were developed
 ## Versions
 
 - `sysstates`: `1.0`
-- `fnkeys`: `1.0`
+- `fnkeys`: `1.1`
 
 ## Directory layout
 
@@ -143,8 +143,12 @@ Edit `fnkeys.conf` to adjust:
 - Plasma panel/taskbar screen assignment for attached and detached modes
 - main and lower backlight sysfs paths
 - direct dock USB path and keyboard match pattern
-- Bluetooth keyboard identity and attached-mode Bluetooth preservation for Fn/media transport
+- Bluetooth keyboard identity, GATT backlight characteristic, and attached-mode Bluetooth preservation for Fn/media transport
 - detachable keyboard backlight level (`0-3`)
+
+The packaged default is `FNKEYS_BACKLIGHT_LEVEL=2`. The fnkeys user service applies that level on startup, after resume/boot commands, and whenever the docked USB keyboard attach event is observed. If `/etc/zenbook-duo/fnkeys.conf` already exists from an older install, update that file or merge the package `.pacnew` so it also contains `FNKEYS_BACKLIGHT_LEVEL=2`.
+
+Bluetooth backlight control uses BlueZ GATT through `bluetoothctl`, matching the working `zenbook-utils` implementation. If Bluetooth writes fail while the keyboard is connected, set `ExportClaimedServices = read-write` under `[GATT]` in `/etc/bluetooth/main.conf`, then restart Bluetooth.
 
 ## Notes
 
@@ -163,6 +167,7 @@ The top-row key behavior can change with the keyboard connection mode and BIOS F
 - when the keyboard is detached, `Fn` + `F1`, `Fn` + `F2`, and so on act as real `F1`, `F2`, and so on
 - when the keyboard is directly attached on the dock connector, the USB keyboard interface emits real `F1`, `F2`, and so on
 - when directly attached, the keyboard can still keep a Bluetooth connection for Fn/media transport, so the Fn-key helper keeps Bluetooth unblocked in attached mode by default
+- the detachable keyboard backlight is set through kernel LED sysfs when available, USB HID when docked/wired, and the BlueZ GATT characteristic when only Bluetooth is connected
 - if the user explicitly blocks Bluetooth, the Fn-key helper respects that and falls back to dock USB only; in that mode the keyboard must be physically attached for regular function-key behavior
 
 Fn-lock settings in the BIOS can invert or normalize this behavior, so check that setting if the top row does not match the expected mode.

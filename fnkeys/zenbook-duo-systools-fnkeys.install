@@ -15,11 +15,24 @@ pre_upgrade() {
 
 post_install() {
   cat <<'EOF'
-zenbook-duo-systools-fnkeys 1.0 installed.
+zenbook-duo-systools-fnkeys 1.1 installed.
+
+The default detachable keyboard backlight level is 2. If you already have
+/etc/zenbook-duo/fnkeys.conf, make sure it contains:
+  FNKEYS_BACKLIGHT_LEVEL=2
+
+Detached Bluetooth backlight control needs this BlueZ setting:
+  [GATT]
+  ExportClaimedServices = read-write
+Then restart Bluetooth:
+  sudo systemctl restart bluetooth
 
 Enable the user-session Fn-key helper:
   systemctl --user daemon-reload
   systemctl --user enable --now zenbook-duo-systools-fnkeys.service
+
+After upgrading an already running helper:
+  systemctl --user restart zenbook-duo-systools-fnkeys.service
 EOF
 }
 

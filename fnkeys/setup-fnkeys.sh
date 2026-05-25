@@ -50,6 +50,11 @@ if [[ "${DEV_MODE}" == false ]]; then
     if ! command -v bluetoothctl >/dev/null 2>&1; then
         echo "Note: bluetoothctl was not found. Bluetooth reconnect/Fn-key transport events cannot be watched."
     fi
+    echo "Bluetooth detached-keyboard backlight needs this BlueZ setting:"
+    echo "  [GATT]"
+    echo "  ExportClaimedServices = read-write"
+    echo "Then restart Bluetooth with:"
+    echo "  sudo systemctl restart bluetooth"
     if [[ "${XDG_CURRENT_DESKTOP:-}" != *KDE* ]]; then
         echo "Note: current desktop is '${XDG_CURRENT_DESKTOP:-unknown}'. This setup is tuned for KDE Plasma Wayland, with gdctl fallback."
     fi
