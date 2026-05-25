@@ -1,12 +1,13 @@
 [Unit]
-Description=Zenbook Duo system power tools
+Description=Zenbook Duo system power and lid policy
 After=multi-user.target
 ConditionPathExists=/usr/bin/zenbook-duo-systools
 
 [Service]
-Type=oneshot
-ExecStart=/usr/bin/zenbook-duo-systools power
-RemainAfterExit=yes
+Type=simple
+ExecStart=/usr/bin/systemd-inhibit --what=handle-lid-switch --why=Zenbook-Duo-lid-policy /usr/bin/zenbook-duo-systools service
+Restart=on-failure
+RestartSec=2s
 
 [Install]
 WantedBy=multi-user.target

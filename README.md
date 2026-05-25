@@ -9,7 +9,7 @@ These scripts are intended for Arch-based Linux distributions and were developed
 
 ## Versions
 
-- `sysstates`: `1.0`
+- `sysstates`: `1.1`
 - `fnkeys`: `1.1`
 
 ## Directory layout
@@ -21,7 +21,7 @@ Contains:
 - `duo-sysstates.sh` — main helper script for display layouts, keyboard detection, backlight control, and power profile management.
 - `duo-sysstates.conf` — default configuration for screens, rotations, docked keyboard detection, and backlight level.
 - `setup-sysstates.sh` — installer for the core helper, config, sudoers policy, services, sleep hook, and prerequisites.
-- `zenbook-duo-systools.service` — optional systemd service unit for power profile automation.
+- `zenbook-duo-systools.service` — optional systemd service unit for power profile automation and lid-close sleep policy.
 - `zenbook-duo-systools-user.service` — optional user service unit that watches keyboard dock/undock events and applies display layouts.
 - `zenbook-duo-systools.sleep` — optional system-sleep hook to reapply settings after resume.
 - `sudoers-zenbook-duo-systools` — sudoers helper config for safe backlight control.
@@ -91,6 +91,12 @@ The user service runs `zenbook-duo-systools watch`, so restart it after package 
 systemctl --user restart zenbook-duo-systools-user.service
 ```
 
+The system service also owns the lid-close policy. It inhibits logind's default lid handling while active, switches keyboard backlight off first, then suspends while charging/on AC or hibernates while discharging/on battery:
+
+```bash
+sudo systemctl enable --now zenbook-duo-systools.service
+```
+
 ### Run the Fn-key helper
 
 From the `fnkeys/` directory:
@@ -125,6 +131,8 @@ Edit `duo-sysstates.conf` to adjust:
 - display rotation values
 - direct dock USB path and keyboard match pattern
 - keyboard backlight percentage (`0-100`)
+- Fnkeys helper path used to switch the detachable keyboard backlight off on lid close
+- lid state path and polling interval
 - opt-in display attach/detach layout switching
 - Plasma/KWin refresh behavior after display layout changes
 - Plasma panel/taskbar screen assignment for attached and detached modes

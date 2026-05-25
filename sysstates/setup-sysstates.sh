@@ -47,7 +47,7 @@ if [[ "${DEV_MODE}" == false ]]; then
   if [[ "${XDG_CURRENT_DESKTOP:-}" != *KDE* ]]; then
     echo "Note: current desktop is '${XDG_CURRENT_DESKTOP:-unknown}'. This setup is tuned for KDE Plasma Wayland."
   fi
-  echo "Enable the system power-profile service with:"
+  echo "Enable the system power/lid policy service with:"
   echo "  sudo systemctl enable --now zenbook-duo-systools.service"
   echo "Enable the user display watcher with:"
   echo "  systemctl --user daemon-reload"

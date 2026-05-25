@@ -10,7 +10,7 @@ set -euo pipefail
 # - power profile selection for AC vs battery
 
 CONFIG_FILE="/etc/zenbook-duo/duo-sysstates.conf"
-HELPER_VERSION="1.0"
+HELPER_VERSION="1.1"
 
 # Default values, override in config file
 LOWER_SCREEN="eDP-2"
@@ -24,6 +24,7 @@ KEYBOARD_DOCK_USB_PATH="3-6"
 KEYBOARD_BT_MAC="E9:C7:F1:96:05:3C"
 KEYBOARD_BT_NAME="ASUS Zenbook Duo Keyboard"
 BACKLIGHT_LEVEL_PERCENT=50
+FNKEYS_HELPER="/usr/bin/zenbook-duo-systools-fnkeys"
 MANAGE_DISPLAY_LAYOUT=false
 MOVE_WINDOWS_TO_MAIN=false
 REFRESH_PLASMA_ON_LAYOUT=false
@@ -32,6 +33,8 @@ WATCH_DEBOUNCE_SECONDS=1
 MOVE_PLASMA_PANELS=true
 PLASMA_PANEL_SCREEN_ATTACHED=0
 PLASMA_PANEL_SCREEN_DETACHED=1
+LID_STATE_PATH="auto"
+LID_WATCH_INTERVAL_SECONDS=1
 
 SUPPORTED_ROTATIONS=(normal left right inverted)
 
@@ -133,6 +136,15 @@ set_keyboard_backlight() {
   log "Keyboard backlight set to ${brightness}/${max} (${target}%)"
 }
 
+set_all_keyboard_backlights_off() {
+  set_keyboard_backlight 0 || true
+
+  if [[ -x "${FNKEYS_HELPER}" ]]; then
+    "${FNKEYS_HELPER}" kbb 0 >/dev/null 2>&1 || \
+      log "Fn-key helper could not switch detachable keyboard backlight off."
+  fi
+}
+
 get_ac_online() {
   local ac
   local ac_online="0"
@@ -169,13 +181,71 @@ lid_close_action() {
   local ac_online
   ac_online="$(get_ac_online)"
 
+  log "Lid closed → switching keyboard backlight off."
+  set_all_keyboard_backlights_off
+
   if [[ "$ac_online" == "1" ]]; then
-    log "Lid closed while on AC → suspending."
+    log "Lid closed while charging/on AC → suspending."
     sudo systemctl suspend || log "Suspend command failed."
   else
-    log "Lid closed on battery → hibernating."
+    log "Lid closed while discharging/on battery → hibernating."
     sudo systemctl hibernate || log "Hibernate command failed."
   fi
+}
+
+find_lid_state_path() {
+  local state_path
+
+  if [[ "${LID_STATE_PATH}" != "auto" ]]; then
+    [[ -r "${LID_STATE_PATH}" ]] && printf '%s' "${LID_STATE_PATH}"
+    return
+  fi
+
+  for state_path in /proc/acpi/button/lid/*/state; do
+    [[ -r "${state_path}" ]] || continue
+    printf '%s' "${state_path}"
+    return
+  done
+}
+
+read_lid_state() {
+  local state_path="${1}"
+  local state=""
+
+  state="$(<"${state_path}")"
+  if [[ "${state}" == *closed* ]]; then
+    printf 'closed'
+  elif [[ "${state}" == *open* ]]; then
+    printf 'open'
+  else
+    printf 'unknown'
+  fi
+}
+
+watch_lid_state() {
+  local state_path last_state current_state
+
+  state_path="$(find_lid_state_path)"
+  if [[ -z "${state_path}" ]]; then
+    log "No readable lid state path found."
+    return 1
+  fi
+
+  last_state="$(read_lid_state "${state_path}")"
+  log "Watching lid state at ${state_path}; initial state: ${last_state}"
+
+  while sleep "${LID_WATCH_INTERVAL_SECONDS}"; do
+    current_state="$(read_lid_state "${state_path}")"
+    if [[ "${current_state}" == "closed" && "${last_state}" != "closed" ]]; then
+      lid_close_action
+    fi
+    last_state="${current_state}"
+  done
+}
+
+run_system_service() {
+  set_power_profile
+  watch_lid_state
 }
 
 get_monitor_geometry() {
@@ -417,8 +487,11 @@ Actions:
   rotate <main|lower|both> <rotation>
                   Apply rotation values for this run
   light           Set keyboard backlight level to configured percent
+  light-off       Switch all known keyboard backlights off
   power           Apply power profile based on AC/battery state
   lid             Suspend on AC or hibernate on battery when lid closes
+  lid-watch       Watch lid state and run lid policy on close
+  service         Apply system policy and watch lid state
   status          Show current keyboard and screen state
   version         Show helper version
   help            Show this help text
@@ -468,6 +541,9 @@ main() {
     light)
       set_keyboard_backlight "$BACKLIGHT_LEVEL_PERCENT"
       ;;
+    light-off)
+      set_all_keyboard_backlights_off
+      ;;
     power)
       set_power_profile
       ;;
@@ -476,6 +552,12 @@ main() {
       ;;
     lid)
       lid_close_action
+      ;;
+    lid-watch)
+      watch_lid_state
+      ;;
+    service)
+      run_system_service
       ;;
     status)
       show_status

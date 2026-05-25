@@ -25,7 +25,7 @@ post_install() {
   cat <<'EOF'
 zenbook-duo-systools 1.0 installed.
 
-Enable the system power-profile service:
+Enable the system power/lid policy service:
   sudo systemctl enable --now zenbook-duo-systools.service
 
 Enable the user-session display watcher:
