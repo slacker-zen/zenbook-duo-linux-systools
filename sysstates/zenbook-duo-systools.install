@@ -23,12 +23,12 @@ pre_upgrade() {
 
 post_install() {
   cat <<'EOF'
-zenbook-duo-systools 0.9 installed.
+zenbook-duo-systools 1.0 installed.
 
 Enable the system power-profile service:
   sudo systemctl enable --now zenbook-duo-systools.service
 
-Enable the user-session display service:
+Enable the user-session display watcher:
   systemctl --user daemon-reload
   systemctl --user enable --now zenbook-duo-systools-user.service
 EOF

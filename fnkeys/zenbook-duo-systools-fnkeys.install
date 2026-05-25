@@ -15,7 +15,7 @@ pre_upgrade() {
 
 post_install() {
   cat <<'EOF'
-zenbook-duo-systools-fnkeys 0.9 installed.
+zenbook-duo-systools-fnkeys 1.0 installed.
 
 Enable the user-session Fn-key helper:
   systemctl --user daemon-reload

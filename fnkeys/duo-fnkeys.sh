@@ -2,7 +2,7 @@
 set -euo pipefail
 
 CONFIG_FILE="/etc/zenbook-duo/fnkeys.conf"
-HELPER_VERSION="0.9"
+HELPER_VERSION="1.0"
 TMP_DIR="/tmp/duo"
 BACKLIGHT_PY_SYSTEM="/usr/lib/zenbook-duo-fnkeys/backlight.py"
 DEFAULT_BACKLIGHT=1
@@ -11,6 +11,8 @@ DEFAULT_MAIN_SCREEN="eDP-1"
 DEFAULT_LOWER_SCREEN="eDP-2"
 DEFAULT_MAIN_BACKLIGHT="/sys/class/backlight/intel_backlight/brightness"
 DEFAULT_LOWER_BACKLIGHT="/sys/class/backlight/card1-eDP-2-backlight/brightness"
+DEFAULT_KEYBOARD_USB_MATCH="Primax|ASUS.*Keyboard|ASUSTeK.*Keyboard|Zenbook Duo.*Keyboard|0b05:1b2[cd]"
+DEFAULT_KEYBOARD_DOCK_USB_PATH="3-6"
 DEFAULT_KEYBOARD_BT_MAC="E9:C7:F1:96:05:3C"
 DEFAULT_KEYBOARD_BT_NAME="ASUS Zenbook Duo Keyboard"
 DEFAULT_LOWER_POSITION="0,1200"
@@ -28,7 +30,9 @@ MAIN_SCREEN="${DUO_MAIN_SCREEN:-$DEFAULT_MAIN_SCREEN}"
 LOWER_SCREEN="${DUO_LOWER_SCREEN:-$DEFAULT_LOWER_SCREEN}"
 MAIN_BACKLIGHT_PATH="${FNKEYS_MAIN_BACKLIGHT_PATH:-$DEFAULT_MAIN_BACKLIGHT}"
 LOWER_BACKLIGHT_PATH="${FNKEYS_LOWER_BACKLIGHT_PATH:-$DEFAULT_LOWER_BACKLIGHT}"
-KEYBOARD_MATCH="${KEYBOARD_MATCH:-Keyboard|ASUS|ASUSTeK|AT Translated Set 2 keyboard}"
+KEYBOARD_MATCH="${KEYBOARD_MATCH:-Primax|ASUS.*Zenbook Duo.*Keyboard|Zenbook Duo.*Keyboard}"
+KEYBOARD_USB_MATCH="${FNKEYS_KEYBOARD_USB_MATCH:-$DEFAULT_KEYBOARD_USB_MATCH}"
+KEYBOARD_DOCK_USB_PATH="${FNKEYS_KEYBOARD_DOCK_USB_PATH:-$DEFAULT_KEYBOARD_DOCK_USB_PATH}"
 KEYBOARD_BT_MAC="${FNKEYS_KEYBOARD_BT_MAC:-$DEFAULT_KEYBOARD_BT_MAC}"
 KEYBOARD_BT_NAME="${FNKEYS_KEYBOARD_BT_NAME:-$DEFAULT_KEYBOARD_BT_NAME}"
 LOWER_POSITION="${FNKEYS_LOWER_POSITION:-$DEFAULT_LOWER_POSITION}"
@@ -36,6 +40,11 @@ MANAGE_DISPLAY="${FNKEYS_MANAGE_DISPLAY:-true}"
 MANAGE_WIFI="${FNKEYS_MANAGE_WIFI:-false}"
 MANAGE_BLUETOOTH="${FNKEYS_MANAGE_BLUETOOTH:-false}"
 SYNC_DISPLAY_BACKLIGHT="${FNKEYS_SYNC_DISPLAY_BACKLIGHT:-false}"
+REFRESH_PLASMA_ON_LAYOUT="${FNKEYS_REFRESH_PLASMA_ON_LAYOUT:-false}"
+RESTART_PLASMA_ON_ATTACH="${FNKEYS_RESTART_PLASMA_ON_ATTACH:-false}"
+MOVE_PLASMA_PANELS="${FNKEYS_MOVE_PLASMA_PANELS:-true}"
+PLASMA_PANEL_SCREEN_ATTACHED="${FNKEYS_PLASMA_PANEL_SCREEN_ATTACHED:-0}"
+PLASMA_PANEL_SCREEN_DETACHED="${FNKEYS_PLASMA_PANEL_SCREEN_DETACHED:-1}"
 PYTHON3="$(command -v python3 || true)"
 GDCTL="$(command -v gdctl || true)"
 KSCREEN="$(command -v kscreen-doctor || true)"
@@ -152,18 +161,35 @@ function duo-has-keyboard-bluetooth() {
   "${BLUETOOTHCTL}" info "${mac}" 2>/dev/null | grep -q "Connected: yes"
 }
 
+function duo-usb-device-matches-dock-path() {
+  local device="$1"
+  local product="" manufacturer="" vendor="" product_id="" devpath="" haystack=""
+
+  [[ -n "${KEYBOARD_DOCK_USB_PATH}" ]] || return 1
+
+  [[ -r "${device}/product" ]] && product="$(<"${device}/product")"
+  [[ -r "${device}/manufacturer" ]] && manufacturer="$(<"${device}/manufacturer")"
+  [[ -r "${device}/idVendor" ]] && vendor="$(<"${device}/idVendor")"
+  [[ -r "${device}/idProduct" ]] && product_id="$(<"${device}/idProduct")"
+  [[ -r "${device}/devpath" ]] && devpath="$(<"${device}/devpath")"
+
+  haystack="${device##*/} ${devpath} ${manufacturer} ${product} ${vendor}:${product_id}"
+  [[ "${haystack}" =~ ${KEYBOARD_USB_MATCH} || "${haystack}" =~ ${KEYBOARD_MATCH} ]] || return 1
+  [[ "${haystack}" =~ ${KEYBOARD_DOCK_USB_PATH} ]]
+}
+
 function duo-has-keyboard-attached() {
-  if command -v libinput >/dev/null 2>&1; then
-    if libinput list-devices 2>/dev/null | grep -Eiq "${KEYBOARD_MATCH}"; then
+  # Attached means docked through the built-in keyboard connector. Bluetooth
+  # and ordinary wired USB both leave the lower screen physically uncovered.
+  local usb_device
+
+  for usb_device in /sys/bus/usb/devices/*; do
+    [[ -d "${usb_device}" ]] || continue
+    if duo-usb-device-matches-dock-path "${usb_device}"; then
       return 0
     fi
-  fi
-  if [[ -n "$(duo-find-keyboard-usb)" ]]; then
-    return 0
-  fi
-  if duo-has-keyboard-bluetooth; then
-    return 0
-  fi
+  done
+
   return 1
 }
 
@@ -253,6 +279,59 @@ function duo-sync-display-backlight() {
   fi
 }
 
+function duo-refresh-plasma-shell() {
+  [[ "${REFRESH_PLASMA_ON_LAYOUT}" == true ]] || return 0
+
+  if command -v qdbus6 >/dev/null 2>&1; then
+    qdbus6 org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.refreshCurrentShell >/dev/null 2>&1 || true
+    qdbus6 org.kde.KWin /KWin org.kde.KWin.reconfigure >/dev/null 2>&1 || true
+  fi
+}
+
+function duo-restart-plasma-shell() {
+  [[ "${RESTART_PLASMA_ON_ATTACH}" == true ]] || return 0
+
+  if ! command -v plasmashell >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if command -v kquitapp6 >/dev/null 2>&1; then
+    kquitapp6 plasmashell >/dev/null 2>&1 || true
+  else
+    pkill -x plasmashell >/dev/null 2>&1 || true
+  fi
+
+  sleep 1
+  if command -v kstart >/dev/null 2>&1; then
+    kstart plasmashell >/dev/null 2>&1 || true
+  else
+    plasmashell >/dev/null 2>&1 &
+  fi
+}
+
+function duo-move-plasma-panels() {
+  local mode="$1"
+  local target_screen=""
+
+  [[ "${MOVE_PLASMA_PANELS}" == true ]] || return 0
+  command -v qdbus6 >/dev/null 2>&1 || return 0
+
+  if [[ "${mode}" == "attached" ]]; then
+    target_screen="${PLASMA_PANEL_SCREEN_ATTACHED}"
+  else
+    target_screen="${PLASMA_PANEL_SCREEN_DETACHED}"
+  fi
+
+  [[ "${target_screen}" =~ ^[0-9]+$ ]] || return 0
+
+  qdbus6 org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript \
+    "panels().forEach(function(panel){ panel.screen = ${target_screen}; });" >/dev/null 2>&1 || true
+}
+
+function duo-run-kscreen-doctor() {
+  ${KSCREEN} "$@" >/dev/null 2>&1 || return 1
+}
+
 function duo-watch-display-backlight() {
   [[ "${SYNC_DISPLAY_BACKLIGHT}" == true ]] || return 0
   while true; do
@@ -271,10 +350,14 @@ function duo-apply-display-layout() {
 
   if [[ -n "${KSCREEN}" ]]; then
     if [[ "${mode}" == "attached" ]]; then
-      ${KSCREEN} "output.${LOWER_SCREEN}.disable" >/dev/null 2>&1 || true
+      duo-run-kscreen-doctor "output.${MAIN_SCREEN}.enable" "output.${MAIN_SCREEN}.position.0,0" "output.${LOWER_SCREEN}.disable" || return 0
+      duo-move-plasma-panels attached
+      duo-refresh-plasma-shell
+      duo-restart-plasma-shell
     else
-      ${KSCREEN} "output.${LOWER_SCREEN}.enable" >/dev/null 2>&1 || true
-      ${KSCREEN} "output.${LOWER_SCREEN}.position.${LOWER_POSITION}" >/dev/null 2>&1 || true
+      duo-run-kscreen-doctor "output.${MAIN_SCREEN}.enable" "output.${MAIN_SCREEN}.position.0,0" "output.${LOWER_SCREEN}.enable" "output.${LOWER_SCREEN}.position.${LOWER_POSITION}" || return 0
+      duo-move-plasma-panels detached
+      duo-refresh-plasma-shell
     fi
     return
   fi

@@ -2,8 +2,8 @@
 
 pkgbase=zenbook-duo-linux-systools
 pkgname=(zenbook-duo-systools zenbook-duo-systools-fnkeys)
-pkgver=0.9
-pkgrel=2
+pkgver=1.0
+pkgrel=3
 pkgdesc='ASUS Zenbook Duo helpers for Arch-based KDE Plasma Wayland systems'
 arch=(any)
 url='https://github.com/nekropolit/zenbook-duo-linux-systools'
@@ -13,7 +13,7 @@ sha256sums=()
 
 package_zenbook-duo-systools() {
   pkgdesc='ASUS Zenbook Duo system-state helper'
-  depends=(bash bluez-utils kscreen libinput power-profiles-daemon sudo systemd)
+  depends=(bash kscreen power-profiles-daemon qt6-tools sudo systemd)
   backup=(
     etc/zenbook-duo/duo-sysstates.conf
     etc/sudoers.d/zenbook-duo-systools
@@ -21,7 +21,7 @@ package_zenbook-duo-systools() {
   install=sysstates/zenbook-duo-systools.install
   conflicts=(zenbook-duo-linux-systools-sysstates)
   replaces=(zenbook-duo-linux-systools-sysstates)
-  provides=(zenbook-duo-linux-systools-sysstates=0.9)
+  provides=("zenbook-duo-linux-systools-sysstates=${pkgver}")
 
   install -Dm755 "${startdir}/sysstates/duo-sysstates.sh" "${pkgdir}/usr/bin/zenbook-duo-systools"
   install -Dm644 "${startdir}/sysstates/duo-sysstates.conf" "${pkgdir}/etc/zenbook-duo/duo-sysstates.conf"
@@ -35,7 +35,7 @@ package_zenbook-duo-systools() {
 
 package_zenbook-duo-systools-fnkeys() {
   pkgdesc='ASUS Zenbook Duo Fn-key and detachable keyboard helper'
-  depends=(bash bluez-utils glib2 inotify-tools kscreen libinput libnotify networkmanager python-pyusb sudo systemd usbutils)
+  depends=(bash bluez-utils glib2 inotify-tools kscreen libinput libnotify networkmanager python-pyusb qt6-tools sudo systemd usbutils)
   backup=(
     etc/zenbook-duo/fnkeys.conf
     etc/sudoers.d/zenbook-duo-systools-fnkeys
@@ -43,7 +43,7 @@ package_zenbook-duo-systools-fnkeys() {
   install=fnkeys/zenbook-duo-systools-fnkeys.install
   conflicts=(zenbook-duo-linux-systools-fnkeys)
   replaces=(zenbook-duo-linux-systools-fnkeys)
-  provides=(zenbook-duo-linux-systools-fnkeys=0.9)
+  provides=("zenbook-duo-linux-systools-fnkeys=${pkgver}")
 
   install -Dm755 "${startdir}/fnkeys/duo-fnkeys.sh" "${pkgdir}/usr/bin/zenbook-duo-systools-fnkeys"
   install -Dm644 "${startdir}/fnkeys/fnkeys.conf" "${pkgdir}/etc/zenbook-duo/fnkeys.conf"

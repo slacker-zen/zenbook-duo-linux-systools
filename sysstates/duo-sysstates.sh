@@ -10,19 +10,28 @@ set -euo pipefail
 # - power profile selection for AC vs battery
 
 CONFIG_FILE="/etc/zenbook-duo/duo-sysstates.conf"
-HELPER_VERSION="0.9"
+HELPER_VERSION="1.0"
 
 # Default values, override in config file
 LOWER_SCREEN="eDP-2"
 MAIN_SCREEN="eDP-1"
 MAIN_ROTATION="normal"
 LOWER_ROTATION="normal"
-KEYBOARD_MATCH="Keyboard|ASUS|ASUSTeK|AT Translated Set 2 keyboard"
+LOWER_POSITION="0,1200"
+KEYBOARD_MATCH="Primax|ASUS.*Zenbook Duo.*Keyboard|Zenbook Duo.*Keyboard"
+KEYBOARD_USB_MATCH="Primax|ASUS.*Keyboard|ASUSTeK.*Keyboard|Zenbook Duo.*Keyboard|0b05:1b2[cd]"
+KEYBOARD_DOCK_USB_PATH="3-6"
 KEYBOARD_BT_MAC="E9:C7:F1:96:05:3C"
 KEYBOARD_BT_NAME="ASUS Zenbook Duo Keyboard"
 BACKLIGHT_LEVEL_PERCENT=50
 MANAGE_DISPLAY_LAYOUT=false
 MOVE_WINDOWS_TO_MAIN=false
+REFRESH_PLASMA_ON_LAYOUT=false
+RESTART_PLASMA_ON_ATTACH=false
+WATCH_DEBOUNCE_SECONDS=1
+MOVE_PLASMA_PANELS=true
+PLASMA_PANEL_SCREEN_ATTACHED=0
+PLASMA_PANEL_SCREEN_DETACHED=1
 
 SUPPORTED_ROTATIONS=(normal left right inverted)
 
@@ -37,33 +46,35 @@ load_config() {
   fi
 }
 
+usb_device_matches_dock_path() {
+  local device="$1"
+  local product="" manufacturer="" vendor="" product_id="" devpath="" haystack=""
+
+  [[ -n "${KEYBOARD_DOCK_USB_PATH}" ]] || return 1
+
+  [[ -r "${device}/product" ]] && product="$(<"${device}/product")"
+  [[ -r "${device}/manufacturer" ]] && manufacturer="$(<"${device}/manufacturer")"
+  [[ -r "${device}/idVendor" ]] && vendor="$(<"${device}/idVendor")"
+  [[ -r "${device}/idProduct" ]] && product_id="$(<"${device}/idProduct")"
+  [[ -r "${device}/devpath" ]] && devpath="$(<"${device}/devpath")"
+
+  haystack="${device##*/} ${devpath} ${manufacturer} ${product} ${vendor}:${product_id}"
+  [[ "${haystack}" =~ ${KEYBOARD_USB_MATCH} || "${haystack}" =~ ${KEYBOARD_MATCH} ]] || return 1
+  [[ "${haystack}" =~ ${KEYBOARD_DOCK_USB_PATH} ]]
+}
+
 keyboard_attached() {
-  if command -v libinput >/dev/null 2>&1; then
-    if libinput list-devices 2>/dev/null | grep -Eiq "${KEYBOARD_MATCH}"; then
+  # Attached means docked through the built-in keyboard connector. Bluetooth
+  # and ordinary wired USB both leave the lower screen physically uncovered.
+  local usb_device
+
+  for usb_device in /sys/bus/usb/devices/*; do
+    [[ -d "${usb_device}" ]] || continue
+    if usb_device_matches_dock_path "${usb_device}"; then
       return 0
     fi
-  fi
-
-  if command -v bluetoothctl >/dev/null 2>&1; then
-    if [[ -n "${KEYBOARD_BT_MAC}" ]] && bluetoothctl info "${KEYBOARD_BT_MAC}" 2>/dev/null | grep -q "Connected: yes"; then
-      return 0
-    fi
-
-    if [[ -n "${KEYBOARD_BT_NAME}" ]]; then
-      local mac
-      mac=$(bluetoothctl devices 2>/dev/null | awk -v name="${KEYBOARD_BT_NAME}" '
-        BEGIN { IGNORECASE=1 }
-        index($0, name) { print $2; exit }
-      ' || true)
-      if [[ -n "${mac}" ]] && bluetoothctl info "${mac}" 2>/dev/null | grep -q "Connected: yes"; then
-        return 0
-      fi
-    fi
-  fi
-
-  for candidate in /dev/input/by-id/*kbd* /dev/input/by-id/*Keyboard* /dev/input/by-path/*kbd* /dev/input/by-path/*keyboard*; do
-    [[ -e "$candidate" ]] && return 0
   done
+
   return 1
 }
 
@@ -207,6 +218,65 @@ move_windows_to_main() {
   done < <(wmctrl -lG)
 }
 
+refresh_plasma_shell() {
+  [[ "${REFRESH_PLASMA_ON_LAYOUT}" == true ]] || return 0
+
+  if command -v qdbus6 >/dev/null 2>&1; then
+    qdbus6 org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.refreshCurrentShell >/dev/null 2>&1 || true
+    qdbus6 org.kde.KWin /KWin org.kde.KWin.reconfigure >/dev/null 2>&1 || true
+    log "Requested Plasma/KWin layout refresh."
+  fi
+}
+
+run_kscreen_doctor() {
+  if ! kscreen-doctor "$@" >/dev/null 2>&1; then
+    log "kscreen-doctor failed to apply display layout."
+    return 1
+  fi
+}
+
+restart_plasma_shell() {
+  [[ "${RESTART_PLASMA_ON_ATTACH}" == true ]] || return 0
+
+  if ! command -v plasmashell >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if command -v kquitapp6 >/dev/null 2>&1; then
+    kquitapp6 plasmashell >/dev/null 2>&1 || true
+  else
+    pkill -x plasmashell >/dev/null 2>&1 || true
+  fi
+
+  sleep 1
+  if command -v kstart >/dev/null 2>&1; then
+    kstart plasmashell >/dev/null 2>&1 || true
+  else
+    plasmashell >/dev/null 2>&1 &
+  fi
+  log "Restarted Plasma Shell after attached layout."
+}
+
+move_plasma_panels() {
+  local mode="$1"
+  local target_screen=""
+
+  [[ "${MOVE_PLASMA_PANELS}" == true ]] || return 0
+  command -v qdbus6 >/dev/null 2>&1 || return 0
+
+  if [[ "${mode}" == "attached" ]]; then
+    target_screen="${PLASMA_PANEL_SCREEN_ATTACHED}"
+  else
+    target_screen="${PLASMA_PANEL_SCREEN_DETACHED}"
+  fi
+
+  [[ "${target_screen}" =~ ^[0-9]+$ ]] || return 0
+
+  qdbus6 org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript \
+    "panels().forEach(function(panel){ panel.screen = ${target_screen}; });" >/dev/null 2>&1 || true
+  log "Requested Plasma panel move to screen ${target_screen} for ${mode} mode."
+}
+
 apply_display_layout() {
   local mode="$1"
   local driver=""
@@ -233,17 +303,25 @@ apply_display_layout() {
   if [[ "$driver" == "kscreen" ]]; then
     if [[ "$mode" == "attached" ]]; then
       log "Applying attached keyboard layout via kscreen-doctor."
-      kscreen-doctor \
+      run_kscreen_doctor \
         output."$MAIN_SCREEN".enable \
+        output."$MAIN_SCREEN".position.0,0 \
         output."$MAIN_SCREEN".rotation."$MAIN_ROTATION" \
-        output."$LOWER_SCREEN".disable
+        output."$LOWER_SCREEN".disable || return 0
+      move_plasma_panels attached
+      refresh_plasma_shell
+      restart_plasma_shell
     else
       log "Applying detached keyboard layout via kscreen-doctor."
-      kscreen-doctor \
+      run_kscreen_doctor \
         output."$MAIN_SCREEN".enable \
+        output."$MAIN_SCREEN".position.0,0 \
         output."$MAIN_SCREEN".rotation."$MAIN_ROTATION" \
         output."$LOWER_SCREEN".enable \
-        output."$LOWER_SCREEN".rotation."$LOWER_ROTATION"
+        output."$LOWER_SCREEN".position."$LOWER_POSITION" \
+        output."$LOWER_SCREEN".rotation."$LOWER_ROTATION" || return 0
+      move_plasma_panels detached
+      refresh_plasma_shell
     fi
   else
     if [[ "$mode" == "attached" ]]; then
@@ -270,12 +348,70 @@ show_status() {
   log "Backlight target: ${BACKLIGHT_LEVEL_PERCENT}%"
 }
 
+current_keyboard_mode() {
+  if keyboard_attached; then
+    printf 'attached'
+  else
+    printf 'detached'
+  fi
+}
+
+apply_if_keyboard_mode_changed() {
+  local current_mode
+
+  current_mode="$(current_keyboard_mode)"
+  if [[ "${current_mode}" != "${WATCH_KEYBOARD_MODE}" ]]; then
+    log "Keyboard state changed: ${WATCH_KEYBOARD_MODE} -> ${current_mode}"
+    WATCH_KEYBOARD_MODE="${current_mode}"
+    if [[ "${MANAGE_DISPLAY_LAYOUT}" == true ]]; then
+      apply_display_layout "${current_mode}"
+    else
+      log "Display layout management disabled."
+    fi
+  fi
+}
+
+watch_keyboard_state() {
+  WATCH_KEYBOARD_MODE="$(current_keyboard_mode)"
+
+  log "Watching keyboard state; initial mode: ${WATCH_KEYBOARD_MODE}"
+  if [[ "${MANAGE_DISPLAY_LAYOUT}" == true ]]; then
+    apply_display_layout "${WATCH_KEYBOARD_MODE}"
+  else
+    log "Display layout management disabled."
+  fi
+
+  if command -v udevadm >/dev/null 2>&1; then
+    if watch_keyboard_state_udev; then
+      return
+    fi
+    log "udevadm monitor unavailable; falling back to polling."
+  fi
+
+  log "Polling keyboard state every 2 seconds."
+  while sleep 2; do
+    apply_if_keyboard_mode_changed
+  done
+}
+
+watch_keyboard_state_udev() {
+  local line
+
+  udevadm monitor --subsystem-match=usb --udev --property | while IFS= read -r line; do
+    if [[ "${line}" == ACTION=* ]]; then
+      sleep "${WATCH_DEBOUNCE_SECONDS}"
+      apply_if_keyboard_mode_changed
+    fi
+  done
+}
+
 usage() {
   cat <<EOF
 Usage: $0 <action> [options]
 
 Actions:
   apply           Apply full configuration for current keyboard state
+  watch           Watch USB attach/detach events and apply display layout
   display [auto|attached|detached]
                   Apply display layout for attached/detached keyboard mode
   rotate <main|lower|both> <rotation>
@@ -334,6 +470,9 @@ main() {
       ;;
     power)
       set_power_profile
+      ;;
+    watch)
+      watch_keyboard_state
       ;;
     lid)
       lid_close_action

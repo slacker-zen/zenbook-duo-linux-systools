@@ -16,8 +16,8 @@ DEV_MODE=false
 PACKAGES=(
   bluez-utils
   kscreen
-  libinput
   power-profiles-daemon
+  qt6-tools
   sudo
 )
 
@@ -44,15 +44,12 @@ if [[ "${DEV_MODE}" == false ]]; then
   if ! command -v powerprofilesctl >/dev/null 2>&1; then
     echo "Note: powerprofilesctl was not found. Power profile changes will be skipped."
   fi
-  if ! command -v bluetoothctl >/dev/null 2>&1; then
-    echo "Note: bluetoothctl was not found. Bluetooth keyboard detection will rely on libinput only."
-  fi
   if [[ "${XDG_CURRENT_DESKTOP:-}" != *KDE* ]]; then
     echo "Note: current desktop is '${XDG_CURRENT_DESKTOP:-unknown}'. This setup is tuned for KDE Plasma Wayland."
   fi
   echo "Enable the system power-profile service with:"
   echo "  sudo systemctl enable --now zenbook-duo-systools.service"
-  echo "Enable the user display/backlight service with:"
+  echo "Enable the user display watcher with:"
   echo "  systemctl --user daemon-reload"
   echo "  systemctl --user enable --now zenbook-duo-systools-user.service"
 else

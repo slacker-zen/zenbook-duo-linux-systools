@@ -1,11 +1,13 @@
 [Unit]
-Description=Zenbook Duo user-session display tools
+Description=Zenbook Duo user-session display watcher
 After=default.target
 ConditionPathExists=/usr/bin/zenbook-duo-systools
 
 [Service]
-Type=oneshot
-ExecStart=/usr/bin/zenbook-duo-systools apply
+Type=simple
+ExecStart=/usr/bin/zenbook-duo-systools watch
+Restart=on-failure
+RestartSec=2s
 
 [Install]
 WantedBy=default.target

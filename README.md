@@ -9,8 +9,8 @@ These scripts are intended for Arch-based Linux distributions and were developed
 
 ## Versions
 
-- `sysstates`: `0.9`
-- `fnkeys`: `0.9`
+- `sysstates`: `1.0`
+- `fnkeys`: `1.0`
 
 ## Directory layout
 
@@ -19,10 +19,10 @@ These scripts are intended for Arch-based Linux distributions and were developed
 Contains:
 
 - `duo-sysstates.sh` — main helper script for display layouts, keyboard detection, backlight control, and power profile management.
-- `duo-sysstates.conf` — default configuration for screens, rotations, keyboard matching, and backlight level.
+- `duo-sysstates.conf` — default configuration for screens, rotations, docked keyboard detection, and backlight level.
 - `setup-sysstates.sh` — installer for the core helper, config, sudoers policy, services, sleep hook, and prerequisites.
 - `zenbook-duo-systools.service` — optional systemd service unit for power profile automation.
-- `zenbook-duo-systools-user.service` — optional user service unit for display and backlight automation.
+- `zenbook-duo-systools-user.service` — optional user service unit that watches keyboard dock/undock events and applies display layouts.
 - `zenbook-duo-systools.sleep` — optional system-sleep hook to reapply settings after resume.
 - `sudoers-zenbook-duo-systools` — sudoers helper config for safe backlight control.
 
@@ -73,6 +73,7 @@ cd sysstates
 ```
 
 The script supports subcommands such as `display`, `rotate`, `light`, `power`, `lid`, `status`, `version`, and `help`.
+Use `watch` to keep the helper running in the user session and react to USB dock/undock events.
 
 ### Install the core helper
 
@@ -84,6 +85,11 @@ cd sysstates
 ```
 
 This installs `/usr/bin/zenbook-duo-systools`, `/etc/zenbook-duo/duo-sysstates.conf`, sudoers rules, systemd units, the sleep hook, and required packages.
+The user service runs `zenbook-duo-systools watch`, so restart it after package upgrades or config changes:
+
+```bash
+systemctl --user restart zenbook-duo-systools-user.service
+```
 
 ### Run the Fn-key helper
 
@@ -115,11 +121,14 @@ The helpers are intentionally independent and use separate configs:
 Edit `duo-sysstates.conf` to adjust:
 
 - main and lower screen names
+- KDE lower-display position
 - display rotation values
-- keyboard match pattern
-- Bluetooth keyboard fallback
+- direct dock USB path and keyboard match pattern
 - keyboard backlight percentage (`0-100`)
 - opt-in display attach/detach layout switching
+- Plasma/KWin refresh behavior after display layout changes
+- Plasma panel/taskbar screen assignment for attached and detached modes
+- watcher debounce delay for USB dock/undock events
 - X11-only window moving compatibility
 
 Edit `fnkeys.conf` to adjust:
@@ -128,12 +137,28 @@ Edit `fnkeys.conf` to adjust:
 - monitor scale
 - KDE lower-display position
 - feature ownership toggles for display, Wi-Fi, Bluetooth, and display-backlight sync
+- Plasma/KWin refresh behavior after display layout changes
+- Plasma panel/taskbar screen assignment for attached and detached modes
 - main and lower backlight sysfs paths
-- keyboard match pattern
-- Bluetooth keyboard fallback
+- direct dock USB path and keyboard match pattern
+- Bluetooth keyboard identity for reconnect events
 - detachable keyboard backlight level (`0-3`)
 
 ## Notes
 
 The helpers are independent. You can install either helper on its own.
-The setup scripts are tuned for Arch-like KDE Plasma Wayland systems such as CachyOS, using `kscreen-doctor` for display layout and `bluetoothctl` as the user-service keyboard detection fallback.
+The setup scripts are tuned for Arch-like KDE Plasma Wayland systems such as CachyOS, using `kscreen-doctor` for display layout.
+
+For `sysstates`, `attached` means the keyboard is connected through the built-in dock connector. On this model that connector appears as `/sys/bus/usb/devices/3-6`. Bluetooth and a normal USB cable can make the keyboard usable, but they still count as `detached` because the lower screen is not physically covered.
+
+On KDE Plasma Wayland, panels and some windows can remain associated with the lower display after `eDP-2` is disabled. The helpers keep Plasma refresh hooks disabled by default because some Plasma sessions can briefly lose the desktop shell during a refresh. If the taskbar still stays on the disabled lower display, first try `REFRESH_PLASMA_ON_LAYOUT=true`; if that is not enough, set `RESTART_PLASMA_ON_ATTACH=true` in `duo-sysstates.conf` or `FNKEYS_RESTART_PLASMA_ON_ATTACH=true` in `fnkeys.conf` for the stronger fallback.
+
+By default, the helpers move Plasma panels to screen `0` in attached mode and screen `1` in detached mode. On the tested KDE layout, screen `0` is `eDP-1` and screen `1` is `eDP-2`. Adjust `PLASMA_PANEL_SCREEN_ATTACHED` and `PLASMA_PANEL_SCREEN_DETACHED` if your Plasma screen numbering differs.
+
+The top-row key behavior can change with the keyboard connection mode and BIOS Fn-lock state. This behavior is provided by firmware/kernel/desktop input handling, not by `duo-fnkeys.sh`; the helper does not remap `F1`, `F2`, `F3`, mute, or volume keys. Observed behavior on this model:
+
+- when the keyboard is detached, `F1`, `F2`, and `F3` act as media keys: volume mute, volume down, and volume up
+- when the keyboard is detached, `Fn` + `F1`, `Fn` + `F2`, and so on act as real `F1`, `F2`, and so on
+- when the keyboard is directly attached on the dock connector, `F1` acts as real `F1`
+
+Fn-lock settings in the BIOS can invert or normalize this behavior, so check that setting if the top row does not match the expected mode.

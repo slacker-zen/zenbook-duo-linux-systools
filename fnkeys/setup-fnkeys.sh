@@ -21,6 +21,7 @@ PACKAGES=(
     libnotify
     networkmanager
     python-pyusb
+    qt6-tools
     sudo
     usbutils
 )
