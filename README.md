@@ -5,6 +5,8 @@ This repository contains pure source code for ASUS Zenbook Duo helpers, separate
 - `sysstates/` — core system state helper scripts for display layout, backlight, and power-profile behavior.
 - `fnkeys/` — optional Fn-key and keyboard attachment helper with an install helper script.
 
+These scripts are intended for Arch-based Linux distributions and were developed under CachyOS with KDE Plasma Wayland.
+
 ## Versions
 
 - `sysstates`: `0.9`
