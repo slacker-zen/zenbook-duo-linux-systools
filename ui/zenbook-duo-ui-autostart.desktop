@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Zenbook Duo Utility
+Comment=Start the Zenbook Duo tray utility
+Exec=zenbook-duo-ui
+Icon=zenbook-duo-ui
+Terminal=false
+Categories=Settings;System;
+X-GNOME-Autostart-enabled=true
+X-KDE-autostart-after=panel
+StartupNotify=false

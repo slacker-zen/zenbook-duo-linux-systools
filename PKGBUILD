@@ -2,17 +2,19 @@
 
 pkgname=zenbook-duo-systools
 pkgver=1.3
-pkgrel=3
-pkgdesc='ASUS Zenbook Duo event matrix, Fn-key, display, power, and lid helpers'
-arch=(any)
+pkgrel=6
+pkgdesc='ASUS Zenbook Duo event matrix, Fn-key, display, power, lid, and tray helpers'
+arch=(x86_64)
 url='https://github.com/nekropolit/zenbook-duo-linux-systools'
 license=(MIT)
 depends=(
   bash
   bluez-utils
   glib2
+  gtk3
   inotify-tools
   kscreen
+  libayatana-appindicator
   libinput
   libnotify
   networkmanager
@@ -23,6 +25,11 @@ depends=(
   sudo
   systemd
   usbutils
+  webkit2gtk-4.1
+)
+makedepends=(
+  npm
+  rust
 )
 backup=(
   etc/zenbook-duo/duo-sysstates.conf
@@ -49,10 +56,21 @@ provides=(
 source=()
 sha256sums=()
 
+build() {
+  cd "${startdir}/ui"
+  npm install --no-package-lock
+  npm run build
+
+  cd "${startdir}/ui/src-tauri"
+  cargo build --release --locked
+}
+
 package() {
   install -Dm755 "${startdir}/coordinator/zenbook-duo-matrix.sh" "${pkgdir}/usr/bin/zenbook-duo-matrix"
+  install -Dm755 "${startdir}/control/zenbook-duo-control.sh" "${pkgdir}/usr/bin/zenbook-duo-control"
   install -Dm755 "${startdir}/sysstates/duo-sysstates.sh" "${pkgdir}/usr/bin/zenbook-duo-systools"
   install -Dm755 "${startdir}/fnkeys/duo-fnkeys.sh" "${pkgdir}/usr/bin/zenbook-duo-systools-fnkeys"
+  install -Dm755 "${startdir}/ui/src-tauri/target/release/zenbook-duo-ui" "${pkgdir}/usr/bin/zenbook-duo-ui"
 
   install -Dm644 "${startdir}/sysstates/duo-sysstates.conf" "${pkgdir}/etc/zenbook-duo/duo-sysstates.conf"
   install -Dm644 "${startdir}/fnkeys/fnkeys.conf" "${pkgdir}/etc/zenbook-duo/fnkeys.conf"
@@ -63,6 +81,10 @@ package() {
   install -Dm644 "${startdir}/sysstates/zenbook-duo-systools.service" "${pkgdir}/usr/lib/systemd/system/zenbook-duo-systools.service"
   install -Dm644 "${startdir}/coordinator/zenbook-duo-matrix.service" "${pkgdir}/usr/lib/systemd/user/zenbook-duo-matrix.service"
   install -Dm755 "${startdir}/sysstates/zenbook-duo-systools.sleep" "${pkgdir}/usr/lib/systemd/system-sleep/zenbook-duo-systools"
+
+  install -Dm644 "${startdir}/ui/zenbook-duo-ui.desktop" "${pkgdir}/usr/share/applications/zenbook-duo-ui.desktop"
+  install -Dm644 "${startdir}/ui/zenbook-duo-ui-autostart.desktop" "${pkgdir}/etc/xdg/autostart/zenbook-duo-ui.desktop"
+  install -Dm644 "${startdir}/ui/src-tauri/icons/128x128.png" "${pkgdir}/usr/share/icons/hicolor/128x128/apps/zenbook-duo-ui.png"
 
   install -Dm755 "${startdir}/fnkeys/backlight.py" "${pkgdir}/usr/lib/zenbook-duo-fnkeys/backlight.py"
   install -Dm755 "${startdir}/fnkeys/input_watcher.py" "${pkgdir}/usr/lib/zenbook-duo-fnkeys/input_watcher.py"

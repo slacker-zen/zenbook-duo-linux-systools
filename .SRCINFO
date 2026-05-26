@@ -1,16 +1,20 @@
 pkgbase = zenbook-duo-systools
-	pkgdesc = ASUS Zenbook Duo event matrix, Fn-key, display, power, and lid helpers
+	pkgdesc = ASUS Zenbook Duo event matrix, Fn-key, display, power, lid, and tray helpers
 	pkgver = 1.3
-	pkgrel = 3
+	pkgrel = 6
 	url = https://github.com/nekropolit/zenbook-duo-linux-systools
 	install = zenbook-duo-systools.install
-	arch = any
+	arch = x86_64
 	license = MIT
+	makedepends = npm
+	makedepends = rust
 	depends = bash
 	depends = bluez-utils
 	depends = glib2
+	depends = gtk3
 	depends = inotify-tools
 	depends = kscreen
+	depends = libayatana-appindicator
 	depends = libinput
 	depends = libnotify
 	depends = networkmanager
@@ -21,6 +25,7 @@ pkgbase = zenbook-duo-systools
 	depends = sudo
 	depends = systemd
 	depends = usbutils
+	depends = webkit2gtk-4.1
 	provides = zenbook-duo-linux-systools-sysstates=1.3
 	provides = zenbook-duo-linux-systools-fnkeys=1.3
 	provides = zenbook-duo-systools-fnkeys=1.3

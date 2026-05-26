@@ -1,0 +1,5 @@
+# Udev rule for ASUS Zenbook backlight control
+# Place this file in /etc/udev/rules.d/
+# Then run: sudo udevadm control --reload-rules && sudo udevadm trigger
+
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0b05", ATTRS{idProduct}=="1b2c", MODE="0666", GROUP="plugdev" 

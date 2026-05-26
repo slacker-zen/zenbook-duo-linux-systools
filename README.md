@@ -3,8 +3,11 @@
 This repository contains ASUS Zenbook Duo helpers built around a single user-session event matrix:
 
 - `coordinator/` — event matrix coordinator that owns the user-session event loop and dispatches to helper commands only on state changes.
+- `control/` — stable command/API layer for tray and UI clients; exposes JSON status/config and forwards actions to the helpers.
+- `ui/` — active tray utility and configuration UI.
 - `sysstates/` — core system state helper scripts for display layout, backlight, and power-profile behavior.
 - `fnkeys/` — Fn-key, input-event, USB HID, Bluetooth GATT, and notification helper scripts.
+- `3rd_src/` — preserved upstream/ancestor source trees that are kept for reference but are not the active development surface.
 
 These scripts are intended for Arch-based Linux distributions and were developed under CachyOS with KDE Plasma Wayland.
 
@@ -45,6 +48,24 @@ Contains:
 
 - `zenbook-duo-matrix.sh` — single user-session coordinator for USB, Bluetooth, polling, and physical Fn-key input events.
 - `zenbook-duo-matrix.service` — user-session service unit for the coordinator.
+
+### `control/`
+
+Contains:
+
+- `zenbook-duo-control.sh` — UI/control boundary used by tray utilities and other clients. It reads status as JSON, lists and writes both helper configs, and forwards actions to the matrix, sysstates, and fnkeys helpers.
+
+### `ui/`
+
+Contains:
+
+- Tauri/Solid tray utility source. This is the active UI development path and talks to `control/zenbook-duo-control.sh` instead of calling matrix, sysstates, or fnkeys directly.
+
+### `3rd_src/`
+
+Contains:
+
+- `asus-zenbookduo/` and `zenbook-utils/` upstream/ancestor source trees. These remain available for reference while the active project code evolves in the root-level helper and UI directories.
 
 ## Runtime Boundary
 
@@ -110,6 +131,22 @@ From the repository root:
 ```
 
 The matrix supports `service`, `reconcile`, `status`, `version`, and `help`.
+
+### Run the control layer
+
+From the repository root:
+
+```bash
+./control/zenbook-duo-control.sh status --json
+./control/zenbook-duo-control.sh config list --json
+./control/zenbook-duo-control.sh display brightness --json
+./control/zenbook-duo-control.sh display brightness step main 10
+./control/zenbook-duo-control.sh display brightness step lower 10
+./control/zenbook-duo-control.sh action matrix reconcile
+./control/zenbook-duo-control.sh action sysstates display detached
+```
+
+The tray/UI should call this control layer instead of calling the individual helper scripts directly.
 
 ### Run the Fn-key helper directly
 
@@ -185,7 +222,7 @@ Edit `fnkeys.conf` to adjust:
 
 The packaged default is `FNKEYS_BACKLIGHT_LEVEL=2`. The matrix reapplies that level when keyboard transport changes to a present keyboard. If `/etc/zenbook-duo/fnkeys.conf` already exists from an older install, update that file or merge the package `.pacnew` so it also contains `FNKEYS_BACKLIGHT_LEVEL=2`.
 
-Bluetooth backlight control uses BlueZ GATT through `bluetoothctl`, matching the working `zenbook-utils` implementation. If Bluetooth writes fail while the keyboard is connected, set `ExportClaimedServices = read-write` under `[GATT]` in `/etc/bluetooth/main.conf`, then restart Bluetooth.
+Bluetooth backlight control uses BlueZ GATT through `bluetoothctl`, matching the preserved `3rd_src/zenbook-utils` implementation. If Bluetooth writes fail while the keyboard is connected, set `ExportClaimedServices = read-write` under `[GATT]` in `/etc/bluetooth/main.conf`, then restart Bluetooth.
 
 The physical backlight level keys on the detachable keyboard are proprietary ASUS input events, not standard key codes. The fnkeys package watches the `ASUS Zenbook Duo Keyboard` input node for `EV_ABS/ABS_MISC`; observed defaults are `16` for the physical backlight-up key and `199` for the physical backlight-down key. The backlight-down key cycles the keyboard backlight through levels `0-3` and shows the new value. The backlight-up key cycles both `eDP-1` and `eDP-2` display brightness in `20%` steps, wrapping from `100%` back to `20%`, and shows the calculated brightness step and target value. Notification delivery falls back to the user session bus at `$XDG_RUNTIME_DIR/bus` so physical-key notifications still work when the user service does not inherit `DBUS_SESSION_BUS_ADDRESS`.
 

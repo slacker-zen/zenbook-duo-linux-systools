@@ -1,6 +1,6 @@
 [submodule "asus-zenbookduo"]
-	path = asus-zenbookduo
+	path = 3rd_src/asus-zenbookduo
 	url = https://github.com/mytikfy/asus-zenbookduo
 [submodule "zenbook-utils"]
-	path = zenbook-utils
+	path = 3rd_src/zenbook-utils
 	url = https://github.com/artonio/zenbook-utils
