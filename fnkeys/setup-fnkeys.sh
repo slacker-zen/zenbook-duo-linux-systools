@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# System-wide install, user-session runtime:
-# files/config/sudoers are installed globally, while KDE/Wayland display
-# behavior runs from the logged-in user's systemd manager.
+# System-wide install, matrix user-session runtime:
+# files/config/sudoers are installed globally, while KDE/Wayland display and
+# keyboard events run through zenbook-duo-matrix.service.
 
 INSTALL_LOCATION=/usr/bin/zenbook-duo-systools-fnkeys
+MATRIX_LOCATION=/usr/bin/zenbook-duo-matrix
 CONFIG_LOCATION=/etc/zenbook-duo/fnkeys.conf
 SUDOERS_LOCATION=/etc/sudoers.d/zenbook-duo-systools-fnkeys
-SERVICE_LOCATION=/etc/systemd/user/zenbook-duo-systools-fnkeys.service
-UDEV_RULE_LOCATION=/etc/udev/rules.d/99-zenbook-duo-fnkeys-input.rules
+SERVICE_LOCATION=/etc/systemd/user/zenbook-duo-matrix.service
+UDEV_RULE_LOCATION=/etc/udev/rules.d/72-zenbook-duo-fnkeys-input.rules
 DEV_MODE=false
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEV_INSTALL_LOCATION="${SCRIPT_DIR}/duo-fnkeys.sh"
@@ -36,15 +37,17 @@ fi
 if [[ "${DEV_MODE}" == false ]]; then
     sudo pacman -Sy --needed --noconfirm "${PACKAGES[@]}"
     sudo install -Dm755 "${SCRIPT_DIR}/duo-fnkeys.sh" "${INSTALL_LOCATION}"
+    sudo install -Dm755 "${SCRIPT_DIR}/../coordinator/zenbook-duo-matrix.sh" "${MATRIX_LOCATION}"
     sudo install -Dm644 "${SCRIPT_DIR}/fnkeys.conf" "${CONFIG_LOCATION}"
     sudo install -Dm755 "${SCRIPT_DIR}/backlight.py" /usr/lib/zenbook-duo-fnkeys/backlight.py
     sudo install -Dm755 "${SCRIPT_DIR}/input_watcher.py" /usr/lib/zenbook-duo-fnkeys/input_watcher.py
-    sudo install -Dm644 "${SCRIPT_DIR}/99-zenbook-duo-fnkeys-input.rules" "${UDEV_RULE_LOCATION}"
+    sudo rm -f /etc/udev/rules.d/99-zenbook-duo-fnkeys-input.rules
+    sudo install -Dm644 "${SCRIPT_DIR}/72-zenbook-duo-fnkeys-input.rules" "${UDEV_RULE_LOCATION}"
 fi
 
 if [[ "${DEV_MODE}" == false ]]; then
     sudo install -Dm440 "${SCRIPT_DIR}/sudoers-zenbook-duo-systools-fnkeys" "${SUDOERS_LOCATION}"
-    sudo install -Dm644 "${SCRIPT_DIR}/zenbook-duo-systools-fnkeys.service" "${SERVICE_LOCATION}"
+    sudo install -Dm644 "${SCRIPT_DIR}/../coordinator/zenbook-duo-matrix.service" "${SERVICE_LOCATION}"
     sudo udevadm control --reload-rules || true
     sudo udevadm trigger --subsystem-match=input || true
 
@@ -65,9 +68,11 @@ if [[ "${DEV_MODE}" == false ]]; then
     if [[ "${XDG_CURRENT_DESKTOP:-}" != *KDE* ]]; then
         echo "Note: current desktop is '${XDG_CURRENT_DESKTOP:-unknown}'. This setup is tuned for KDE Plasma Wayland, with gdctl fallback."
     fi
-    echo "Enable the fnkey helper service with:"
+    echo "Enable the matrix service with:"
     echo "  systemctl --user daemon-reload"
-    echo "  systemctl --user enable --now zenbook-duo-systools-fnkeys.service"
+    echo "  systemctl --user enable --now zenbook-duo-matrix.service"
+    echo "Disable older duplicate user services if they are enabled:"
+    echo "  systemctl --user disable --now zenbook-duo-systools-user.service zenbook-duo-systools-fnkeys.service"
     echo "If the physical keyboard backlight keys do not react immediately, reconnect the keyboard or restart the user service."
 else
     echo "Dev mode selected. Run fnkeys directly from:"

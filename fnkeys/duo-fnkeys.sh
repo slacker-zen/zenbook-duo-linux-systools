@@ -2,7 +2,7 @@
 set -euo pipefail
 
 CONFIG_FILE="/etc/zenbook-duo/fnkeys.conf"
-HELPER_VERSION="1.1"
+HELPER_VERSION="1.2"
 TMP_DIR="/tmp/duo"
 BACKLIGHT_PY_SYSTEM="/usr/lib/zenbook-duo-fnkeys/backlight.py"
 INPUT_WATCHER_SYSTEM="/usr/lib/zenbook-duo-fnkeys/input_watcher.py"
@@ -49,6 +49,7 @@ BACKLIGHT_UP_VALUE="${FNKEYS_BACKLIGHT_UP_VALUE:-$DEFAULT_BACKLIGHT_UP_VALUE}"
 BACKLIGHT_DOWN_VALUE="${FNKEYS_BACKLIGHT_DOWN_VALUE:-$DEFAULT_BACKLIGHT_DOWN_VALUE}"
 BACKLIGHT_EVENT_CODE="${FNKEYS_BACKLIGHT_EVENT_CODE:-ABS_MISC}"
 BACKLIGHT_STATE_FILE="${FNKEYS_BACKLIGHT_STATE_FILE:-${TMP_DIR}/kb-backlight-level}"
+KEYBOARD_MODE_STATE_FILE="${FNKEYS_KEYBOARD_MODE_STATE_FILE:-${TMP_DIR}/keyboard-mode}"
 BACKLIGHT_EVENT_DEBOUNCE_SECONDS="${FNKEYS_BACKLIGHT_EVENT_DEBOUNCE_SECONDS:-0.15}"
 DISPLAY_BRIGHTNESS_STEP="${FNKEYS_DISPLAY_BRIGHTNESS_STEP:-$DEFAULT_DISPLAY_BRIGHTNESS_STEP}"
 LOWER_POSITION="${FNKEYS_LOWER_POSITION:-$DEFAULT_LOWER_POSITION}"
@@ -266,18 +267,41 @@ function duo-unblock-bluetooth-if-allowed() {
   rfkill unblock bluetooth >/dev/null 2>&1 || true
 }
 
+function duo-notify-send() {
+  local icon="${1}"
+  local summary="${2}"
+  local body="${3:-}"
+
+  [[ -n "${NOTIFY_SEND}" ]] || return 0
+
+  if [[ -z "${DBUS_SESSION_BUS_ADDRESS:-}" && -n "${XDG_RUNTIME_DIR:-}" && -S "${XDG_RUNTIME_DIR}/bus" ]]; then
+    DBUS_SESSION_BUS_ADDRESS="unix:path=${XDG_RUNTIME_DIR}/bus" \
+      ${NOTIFY_SEND} -a "Zenbook Duo" -t 1200 --hint=int:transient:1 -i "${icon}" "${summary}" "${body}" || true
+    return 0
+  fi
+
+  ${NOTIFY_SEND} -a "Zenbook Duo" -t 1200 --hint=int:transient:1 -i "${icon}" "${summary}" "${body}" || true
+}
+
 function duo-notify-keyboard-mode() {
   local mode="${1}"
   local message="${2}"
   local state_file="${TMP_DIR}/last-notified-keyboard-mode"
   local last_mode=""
 
-  [[ -n "${NOTIFY_SEND}" ]] || return 0
   [[ -r "${state_file}" ]] && last_mode="$(<"${state_file}")"
   [[ "${last_mode}" != "${mode}" ]] || return 0
 
   printf '%s' "${mode}" >"${state_file}"
-  ${NOTIFY_SEND} -a "Zenbook Duo" -t 1000 --hint=int:transient:1 -i "preferences-desktop-display" "${message}" || true
+  duo-notify-send "preferences-desktop-display" "${message}"
+}
+
+function duo-notify() {
+  local icon="${1}"
+  local summary="${2}"
+  local body="${3:-}"
+
+  duo-notify-send "${icon}" "${summary}" "${body}"
 }
 
 function duo-set-status() {
@@ -353,10 +377,16 @@ function duo-normalize-backlight-level() {
 }
 
 function duo-cycle-kb-backlight() {
-  local current next
+  local current next status=0
   current="$(duo-read-backlight-state)"
   next=$(( (current + 1) % 4 ))
-  duo-set-kb-backlight "${next}"
+  duo-set-kb-backlight "${next}" || status=$?
+  if (( status == 0 )); then
+    duo-notify "keyboard-brightness" "Keyboard backlight ${next}/3" "Level ${next}"
+  else
+    duo-notify "dialog-warning" "Keyboard backlight ${next}/3" "Level requested; privileged write returned ${status}"
+    return "${status}"
+  fi
 }
 
 function duo-set-kb-backlight() {
@@ -477,7 +507,7 @@ function duo-write-display-brightness-percent() {
 }
 
 function duo-cycle-display-brightness() {
-  local step current next
+  local step current next status=0
 
   step="$(duo-normalize-display-brightness-step "${DISPLAY_BRIGHTNESS_STEP}")"
   current="$(duo-read-display-brightness-percent "${MAIN_BACKLIGHT_PATH}" || true)"
@@ -494,8 +524,14 @@ function duo-cycle-display-brightness() {
     fi
   fi
 
-  duo-write-display-brightness-percent "${MAIN_BACKLIGHT_PATH}" "${next}"
-  duo-write-display-brightness-percent "${LOWER_BACKLIGHT_PATH}" "${next}"
+  duo-write-display-brightness-percent "${MAIN_BACKLIGHT_PATH}" "${next}" || status=$?
+  duo-write-display-brightness-percent "${LOWER_BACKLIGHT_PATH}" "${next}" || status=$?
+  if (( status == 0 )); then
+    duo-notify "display-brightness" "Display brightness ${next}%" "${MAIN_SCREEN} + ${LOWER_SCREEN}, step ${step}%"
+  else
+    duo-notify "dialog-warning" "Display brightness ${next}%" "${MAIN_SCREEN} + ${LOWER_SCREEN}, step ${step}%; privileged write returned ${status}"
+    return "${status}"
+  fi
 }
 
 function duo-set-kb-backlight-retry() {
@@ -642,6 +678,11 @@ function duo-check-monitor() {
   if duo-has-keyboard-attached; then
     KEYBOARD_ATTACHED=true
   fi
+  if [[ "${KEYBOARD_ATTACHED}" == true ]]; then
+    printf 'attached' >"${KEYBOARD_MODE_STATE_FILE}"
+  else
+    printf 'detached' >"${KEYBOARD_MODE_STATE_FILE}"
+  fi
   MONITOR_COUNT=$(duo-monitor-count)
   if [[ "${MANAGE_WIFI}" == true ]]; then
     WIFI_BEFORE=$(nmcli radio wifi 2>/dev/null || echo disabled)
@@ -726,12 +767,12 @@ function duo-watch-monitor() {
   if command -v udevadm >/dev/null 2>&1; then
     udevadm monitor --subsystem-match=usb --udev --property | while read -r LINE; do
       if [[ "${LINE}" == ACTION=* ]]; then
-        duo-check-monitor
+        duo-check-monitor-if-mode-changed
       fi
     done
   else
     while inotifywait -e create,delete,modify /dev/bus/usb/* >/dev/null 2>&1; do
-      duo-check-monitor
+      duo-check-monitor-if-mode-changed
     done
   fi
 }
@@ -758,6 +799,17 @@ function duo-watch-keyboard-state-poll() {
   done
 }
 
+function duo-check-monitor-if-mode-changed() {
+  local last_mode current_mode
+
+  current_mode="$(duo-current-keyboard-mode)"
+  last_mode="$(cat "${KEYBOARD_MODE_STATE_FILE}" 2>/dev/null || true)"
+
+  if [[ "${current_mode}" != "${last_mode}" ]]; then
+    duo-check-monitor
+  fi
+}
+
 function duo-watch-keyboard-bluetooth() {
   [[ -n "${BLUETOOTHCTL}" ]] || return 0
   if ! command -v gdbus >/dev/null 2>&1; then
@@ -766,7 +818,7 @@ function duo-watch-keyboard-bluetooth() {
 
   gdbus monitor -y -d org.bluez | grep --line-buffered -E "Connected|InterfacesAdded|InterfacesRemoved" | while read -r _LINE; do
     sleep 1
-    duo-check-monitor
+    duo-check-monitor-if-mode-changed
   done
 }
 
@@ -779,6 +831,7 @@ function duo-watch-keyboard-backlight-input() {
   [[ -n "${input_watcher}" ]] || return 0
 
   FNKEYS_KEYBOARD_INPUT_NAME="${KEYBOARD_BT_NAME}" \
+  FNKEYS_KEYBOARD_INPUT_NAME_REGEX="(ASUS|Primax).*Zenbook Duo Keyboard" \
   FNKEYS_BACKLIGHT_EVENT_CODE="${BACKLIGHT_EVENT_CODE}" \
   FNKEYS_BACKLIGHT_UP_VALUE="${BACKLIGHT_UP_VALUE}" \
   FNKEYS_BACKLIGHT_DOWN_VALUE="${BACKLIGHT_DOWN_VALUE}" \
@@ -804,6 +857,9 @@ function duo-cli() {
       ;;
     display-brightness-cycle)
       duo-cycle-display-brightness
+      ;;
+    notify-test)
+      duo-notify "dialog-information" "Zenbook Duo notification test" "User-session notifications are available"
       ;;
     left-up)
       if [[ -n "${KSCREEN}" ]]; then

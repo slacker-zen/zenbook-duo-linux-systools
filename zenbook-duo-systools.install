@@ -1,0 +1,74 @@
+_cleanup_legacy_units() {
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl disable --now zenbook-duo.service >/dev/null 2>&1 || true
+    systemctl --global disable zenbook-duo-user.service >/dev/null 2>&1 || true
+    systemctl --global disable zenbook-duo-systools-user.service >/dev/null 2>&1 || true
+    systemctl --global disable zenbook-duo-systools-fnkeys.service >/dev/null 2>&1 || true
+    systemctl daemon-reload >/dev/null 2>&1 || true
+  fi
+
+  rm -f \
+    /etc/systemd/system/zenbook-duo.service \
+    /etc/systemd/user/zenbook-duo-user.service \
+    /etc/systemd/user/zenbook-duo-systools-user.service \
+    /etc/systemd/user/zenbook-duo-systools-fnkeys.service \
+    /usr/local/bin/duo \
+    /usr/lib/systemd/system-sleep/duo \
+    /etc/sudoers.d/zenbook-duo \
+    /etc/udev/rules.d/99-zenbook-duo-fnkeys-input.rules
+}
+
+_reload_udev_rules() {
+  if command -v udevadm >/dev/null 2>&1; then
+    udevadm control --reload-rules >/dev/null 2>&1 || true
+    udevadm trigger --subsystem-match=input >/dev/null 2>&1 || true
+  fi
+}
+
+pre_install() {
+  _cleanup_legacy_units
+}
+
+pre_upgrade() {
+  _cleanup_legacy_units
+}
+
+post_install() {
+  _reload_udev_rules
+
+  cat <<'EOF'
+zenbook-duo-systools 1.3 installed.
+
+This is now a single package. The user-session event matrix owns USB,
+Bluetooth, polling, and physical Fn-key events, then dispatches to the
+underlying display, power, keyboard-backlight, and notification helpers.
+
+Enable the system power/lid policy:
+  sudo systemctl enable --now zenbook-duo-systools.service
+
+Enable the user-session matrix:
+  systemctl --user daemon-reload
+  systemctl --user enable --now zenbook-duo-matrix.service
+
+Make sure old duplicate user services are stopped in your session:
+  systemctl --user disable --now zenbook-duo-systools-user.service zenbook-duo-systools-fnkeys.service
+
+Check matrix state:
+  zenbook-duo-matrix status
+
+Test desktop notifications:
+  zenbook-duo-systools-fnkeys notify-test
+EOF
+}
+
+post_upgrade() {
+  post_install
+}
+
+pre_remove() {
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl disable --now zenbook-duo-systools.service >/dev/null 2>&1 || true
+    systemctl --global disable zenbook-duo-matrix.service >/dev/null 2>&1 || true
+    systemctl daemon-reload >/dev/null 2>&1 || true
+  fi
+}

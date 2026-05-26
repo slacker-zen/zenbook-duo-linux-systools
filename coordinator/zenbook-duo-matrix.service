@@ -1,0 +1,13 @@
+[Unit]
+Description=Zenbook Duo event matrix coordinator
+After=default.target
+ConditionPathExists=/usr/bin/zenbook-duo-matrix
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/zenbook-duo-matrix service
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=default.target

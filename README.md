@@ -1,16 +1,18 @@
 # zenbook-duo-linux-systools
 
-This repository contains pure source code for ASUS Zenbook Duo helpers, separated into two clean directories:
+This repository contains ASUS Zenbook Duo helpers built around a single user-session event matrix:
 
+- `coordinator/` — event matrix coordinator that owns the user-session event loop and dispatches to helper commands only on state changes.
 - `sysstates/` — core system state helper scripts for display layout, backlight, and power-profile behavior.
-- `fnkeys/` — optional Fn-key and keyboard attachment helper with an install helper script.
+- `fnkeys/` — Fn-key, input-event, USB HID, Bluetooth GATT, and notification helper scripts.
 
 These scripts are intended for Arch-based Linux distributions and were developed under CachyOS with KDE Plasma Wayland.
 
 ## Versions
 
 - `sysstates`: `1.1`
-- `fnkeys`: `1.1`
+- `fnkeys`: `1.2`
+- `matrix`: `1.0`
 
 ## Directory layout
 
@@ -22,7 +24,6 @@ Contains:
 - `duo-sysstates.conf` — default configuration for screens, rotations, docked keyboard detection, and backlight level.
 - `setup-sysstates.sh` — installer for the core helper, config, sudoers policy, services, sleep hook, and prerequisites.
 - `zenbook-duo-systools.service` — optional systemd service unit for power profile automation and lid-close sleep policy.
-- `zenbook-duo-systools-user.service` — optional user service unit that watches keyboard dock/undock events and applies display layouts.
 - `zenbook-duo-systools.sleep` — optional system-sleep hook to reapply settings after resume.
 - `sudoers-zenbook-duo-systools` — sudoers helper config for safe backlight control.
 
@@ -34,24 +35,30 @@ Contains:
 - `fnkeys.conf` — standalone Fn-key helper configuration.
 - `backlight.py` — USB and Bluetooth GATT keyboard backlight helper.
 - `input_watcher.py` — evdev watcher for the physical keyboard backlight up/down keys.
-- `99-zenbook-duo-fnkeys-input.rules` — udev rule that lets the active user service read the keyboard input node.
-- `zenbook-duo-systools-fnkeys.service` — optional user service unit for Fn-key, USB, and Bluetooth keyboard events.
+- `72-zenbook-duo-fnkeys-input.rules` — udev rule that lets the active user service read the keyboard input node.
 - `setup-fnkeys.sh` — optional prerequisite installer for the Fn-key helper.
 - `sudoers-zenbook-duo-systools-fnkeys` — sudoers helper config for Fn-key backlight control.
 
+### `coordinator/`
+
+Contains:
+
+- `zenbook-duo-matrix.sh` — single user-session coordinator for USB, Bluetooth, polling, and physical Fn-key input events.
+- `zenbook-duo-matrix.service` — user-session service unit for the coordinator.
+
 ## Runtime Boundary
 
-Both helpers follow the same rule:
+Runtime follows this rule:
 
 - installation, configuration, sudoers policy, and shared helper binaries are system-wide
-- power and sleep behavior are system-level
-- KDE/Wayland display layout, notifications, and keyboard-session behavior run as user services
+- power and sleep behavior run through the system service
+- KDE/Wayland display layout, notifications, USB/Bluetooth keyboard transport, and physical Fn-key behavior run through the single user-session matrix service
 
-This split is intentional. KDE/Wayland display control belongs to the active logged-in session, while privileged writes are limited to the installed sudoers policies.
+This boundary is intentional. KDE/Wayland display control belongs to the active logged-in session, while privileged writes are limited to installed sudoers policies and narrow helper commands.
 
 ## Usage
 
-### Build packages
+### Build Package
 
 From the repository root:
 
@@ -59,12 +66,11 @@ From the repository root:
 makepkg -f
 ```
 
-This builds:
+This builds one package:
 
 - `zenbook-duo-systools`
-- `zenbook-duo-systools-fnkeys`
 
-The package metadata declares conflicts and replacements for earlier split package names. The install scripts remove old hand-made `duo` service entries before installing the packaged helpers.
+The package metadata conflicts with and replaces the earlier split package names. The install script removes old hand-made `duo` service entries and disables the older duplicate user services.
 
 ### Run the core helper
 
@@ -76,7 +82,7 @@ cd sysstates
 ```
 
 The script supports subcommands such as `display`, `rotate`, `light`, `power`, `lid`, `status`, `version`, and `help`.
-Use `watch` to keep the helper running in the user session and react to USB dock/undock events.
+Its `watch` command is legacy; the matrix service should own user-session event watching.
 
 ### Install the core helper
 
@@ -87,12 +93,7 @@ cd sysstates
 ./setup-sysstates.sh
 ```
 
-This installs `/usr/bin/zenbook-duo-systools`, `/etc/zenbook-duo/duo-sysstates.conf`, sudoers rules, systemd units, the sleep hook, and required packages.
-The user service runs `zenbook-duo-systools watch`, so restart it after package upgrades or config changes:
-
-```bash
-systemctl --user restart zenbook-duo-systools-user.service
-```
+This installs `/usr/bin/zenbook-duo-systools`, `/etc/zenbook-duo/duo-sysstates.conf`, sudoers rules, the system power/lid unit, the sleep hook, and required packages.
 
 The system service also owns the lid-close policy. It inhibits logind's default lid handling while active, switches keyboard backlight off first, then suspends while charging/on AC or hibernates while discharging/on battery:
 
@@ -100,29 +101,52 @@ The system service also owns the lid-close policy. It inhibits logind's default 
 sudo systemctl enable --now zenbook-duo-systools.service
 ```
 
-### Run the Fn-key helper
+### Run the matrix
+
+From the repository root:
+
+```bash
+./coordinator/zenbook-duo-matrix.sh status
+```
+
+The matrix supports `service`, `reconcile`, `status`, `version`, and `help`.
+
+### Run the Fn-key helper directly
 
 From the `fnkeys/` directory:
 
 ```bash
 cd fnkeys
-./duo-fnkeys.sh
+./duo-fnkeys.sh notify-test
 ```
 
-### Install Fn-key prerequisites
+### Install the package
 
-From `fnkeys/`:
+From the repository root after `makepkg -f`:
 
 ```bash
-cd fnkeys
-./setup-fnkeys.sh
+sudo pacman -R --noconfirm zenbook-duo-systools-fnkeys
+sudo pacman -U --noconfirm zenbook-duo-systools-1.3-2-any.pkg.tar.zst
 ```
 
-This installs `/usr/bin/zenbook-duo-systools-fnkeys`, `/etc/zenbook-duo/fnkeys.conf`, the USB/Bluetooth backlight helpers, the input watcher, sudoers rules, the user service unit, udev input permissions, and required packages.
+If you previously used the setup script before `input_watcher.py` was packaged, pacman may report that `/usr/lib/zenbook-duo-fnkeys/input_watcher.py` exists in the filesystem. That stale helper is not package-owned; upgrade with:
+
+```bash
+sudo pacman -R --noconfirm zenbook-duo-systools-fnkeys
+sudo pacman -U --overwrite usr/lib/zenbook-duo-fnkeys/input_watcher.py zenbook-duo-systools-1.3-2-any.pkg.tar.zst
+```
+
+The matrix service should be the only user-session owner of display and keyboard events. Keep the system `zenbook-duo-systools.service` enabled for lid/power policy, but disable the older user watchers when using the matrix:
+
+```bash
+sudo systemctl enable --now zenbook-duo-systools.service
+systemctl --user disable --now zenbook-duo-systools-user.service zenbook-duo-systools-fnkeys.service
+systemctl --user enable --now zenbook-duo-matrix.service
+```
 
 ## Configuration
 
-The helpers are intentionally independent and use separate configs:
+The action helpers use separate configs, and the matrix reads both:
 
 - `sysstates/duo-sysstates.conf` installs to `/etc/zenbook-duo/duo-sysstates.conf`
 - `fnkeys/fnkeys.conf` installs to `/etc/zenbook-duo/fnkeys.conf`
@@ -156,18 +180,31 @@ Edit `fnkeys.conf` to adjust:
 - direct dock USB path and keyboard match pattern
 - Bluetooth keyboard identity, GATT backlight characteristic, and attached-mode Bluetooth preservation for Fn/media transport
 - detachable keyboard backlight level (`0-3`)
-- physical keyboard backlight key event watching (`ABS_MISC` values `16` and `199` by default) and display brightness cycle step
+- physical keyboard backlight key event watching (`ABS_MISC` values `16` and `199` by default), enabled transports, and display brightness cycle step
+- matrix coordinator toggles for USB, Bluetooth, display ownership, keyboard-backlight reapply, and low-rate polling
 
-The packaged default is `FNKEYS_BACKLIGHT_LEVEL=2`. The fnkeys user service applies that level on startup, after resume/boot commands, and whenever the docked USB keyboard attach event is observed. If `/etc/zenbook-duo/fnkeys.conf` already exists from an older install, update that file or merge the package `.pacnew` so it also contains `FNKEYS_BACKLIGHT_LEVEL=2`.
+The packaged default is `FNKEYS_BACKLIGHT_LEVEL=2`. The matrix reapplies that level when keyboard transport changes to a present keyboard. If `/etc/zenbook-duo/fnkeys.conf` already exists from an older install, update that file or merge the package `.pacnew` so it also contains `FNKEYS_BACKLIGHT_LEVEL=2`.
 
 Bluetooth backlight control uses BlueZ GATT through `bluetoothctl`, matching the working `zenbook-utils` implementation. If Bluetooth writes fail while the keyboard is connected, set `ExportClaimedServices = read-write` under `[GATT]` in `/etc/bluetooth/main.conf`, then restart Bluetooth.
 
-The physical backlight level keys on the detachable keyboard are proprietary ASUS input events, not standard key codes. The fnkeys package watches the `ASUS Zenbook Duo Keyboard` input node for `EV_ABS/ABS_MISC`; observed defaults are `16` for the physical backlight-up key and `199` for the physical backlight-down key. The backlight-down key cycles the keyboard backlight through levels `0-3`; the backlight-up key cycles both `eDP-1` and `eDP-2` display brightness in `20%` steps, wrapping from `100%` back to `20%`.
+The physical backlight level keys on the detachable keyboard are proprietary ASUS input events, not standard key codes. The fnkeys package watches the `ASUS Zenbook Duo Keyboard` input node for `EV_ABS/ABS_MISC`; observed defaults are `16` for the physical backlight-up key and `199` for the physical backlight-down key. The backlight-down key cycles the keyboard backlight through levels `0-3` and shows the new value. The backlight-up key cycles both `eDP-1` and `eDP-2` display brightness in `20%` steps, wrapping from `100%` back to `20%`, and shows the calculated brightness step and target value. Notification delivery falls back to the user session bus at `$XDG_RUNTIME_DIR/bus` so physical-key notifications still work when the user service does not inherit `DBUS_SESSION_BUS_ADDRESS`.
+
+Minor boot issue corrected: the fnkeys user service reapplies the configured detachable keyboard backlight during startup/boot and after resume, so the keyboard should return to the configured `FNKEYS_BACKLIGHT_LEVEL` without pressing a physical backlight key.
+
+USB cradle note: a detached keyboard connected by ordinary USB appears as `0b05:1b2c`, but it is still treated as `detached` unless it is on the configured dock path. USB and Bluetooth watcher events are filtered through the physical dock-mode state, so a cradle connection should not repeatedly reapply display layout or USB backlight setup.
+
+The event matrix derives state first, then dispatches:
+
+- `physical_mode`: `attached` when the keyboard is on the configured dock path, otherwise `detached`
+- `transport`: `dock_usb`, `cradle_usb`, `bluetooth`, or `absent`
+- display layout is applied only when `physical_mode` changes
+- keyboard backlight is reapplied only when transport changes to a present keyboard
+- physical backlight keys are still handled through the evdev watcher and invoke the narrow fnkeys subcommands
+- by default the physical `ABS_MISC` watcher only runs for `transport=bluetooth`; ordinary USB cradle transport does not expose the same proprietary event path and is skipped to avoid idle polling
 
 ## Notes
 
-The helpers are independent. You can install either helper on its own.
-The setup scripts are tuned for Arch-like KDE Plasma Wayland systems such as CachyOS, using `kscreen-doctor` for display layout.
+The package is unified, but the helper commands remain narrow and testable. The setup scripts are kept for development/manual installs; the Arch package is the preferred installation path.
 
 For `sysstates`, `attached` means the keyboard is connected through the built-in dock connector. On this model that connector appears as `/sys/bus/usb/devices/3-6`. Bluetooth and a normal USB cable can make the keyboard usable, but they still count as `detached` because the lower screen is not physically covered.
 

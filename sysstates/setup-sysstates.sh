@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# System-wide install, split runtime:
-# power/sleep behavior is system-level; KDE/Wayland display behavior runs
-# from the logged-in user's systemd manager.
+# System-wide install:
+# power/sleep behavior is system-level; KDE/Wayland display and keyboard
+# events run through zenbook-duo-matrix.service.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_LOCATION=/usr/bin/zenbook-duo-systools
 CONFIG_LOCATION=/etc/zenbook-duo/duo-sysstates.conf
 SUDOERS_LOCATION=/etc/sudoers.d/zenbook-duo-systools
 SYSTEM_SERVICE_LOCATION=/etc/systemd/system/zenbook-duo-systools.service
-USER_SERVICE_LOCATION=/etc/systemd/user/zenbook-duo-systools-user.service
 SLEEP_HOOK_LOCATION=/usr/lib/systemd/system-sleep/zenbook-duo-systools
 DEV_MODE=false
 PACKAGES=(
@@ -32,7 +31,6 @@ if [[ "${DEV_MODE}" == false ]]; then
   sudo install -Dm644 "${SCRIPT_DIR}/duo-sysstates.conf" "${CONFIG_LOCATION}"
   sudo install -Dm440 "${SCRIPT_DIR}/sudoers-zenbook-duo-systools" "${SUDOERS_LOCATION}"
   sudo install -Dm644 "${SCRIPT_DIR}/zenbook-duo-systools.service" "${SYSTEM_SERVICE_LOCATION}"
-  sudo install -Dm644 "${SCRIPT_DIR}/zenbook-duo-systools-user.service" "${USER_SERVICE_LOCATION}"
   sudo install -Dm755 "${SCRIPT_DIR}/zenbook-duo-systools.sleep" "${SLEEP_HOOK_LOCATION}"
   sudo systemctl daemon-reload
 
@@ -49,9 +47,7 @@ if [[ "${DEV_MODE}" == false ]]; then
   fi
   echo "Enable the system power/lid policy service with:"
   echo "  sudo systemctl enable --now zenbook-duo-systools.service"
-  echo "Enable the user display watcher with:"
-  echo "  systemctl --user daemon-reload"
-  echo "  systemctl --user enable --now zenbook-duo-systools-user.service"
+  echo "User-session display events are handled by zenbook-duo-matrix.service."
 else
   echo "Dev mode selected. Run sysstates directly from:"
   echo "  ${INSTALL_LOCATION}"

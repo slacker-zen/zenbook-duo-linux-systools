@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import os
+import re
 import subprocess
 import sys
 import time
@@ -8,6 +9,7 @@ from evdev import InputDevice, ecodes, list_devices
 from select import select
 
 KEYBOARD_NAME = os.environ.get('FNKEYS_KEYBOARD_INPUT_NAME', 'ASUS Zenbook Duo Keyboard')
+KEYBOARD_NAME_REGEX = os.environ.get('FNKEYS_KEYBOARD_INPUT_NAME_REGEX', '')
 ABS_CODE = os.environ.get('FNKEYS_BACKLIGHT_EVENT_CODE', 'ABS_MISC')
 UP_VALUE = int(os.environ.get('FNKEYS_BACKLIGHT_UP_VALUE', '16'))
 DOWN_VALUE = int(os.environ.get('FNKEYS_BACKLIGHT_DOWN_VALUE', '199'))
@@ -31,6 +33,14 @@ def run_helper(command):
     )
 
 
+def device_name_matches(name):
+    if name == KEYBOARD_NAME:
+        return True
+    if KEYBOARD_NAME_REGEX:
+        return re.search(KEYBOARD_NAME_REGEX, name, re.IGNORECASE) is not None
+    return False
+
+
 def candidate_devices():
     target_code = abs_code_number()
     devices = []
@@ -38,7 +48,7 @@ def candidate_devices():
     for path in list_devices():
         try:
             device = InputDevice(path)
-            if device.name != KEYBOARD_NAME:
+            if not device_name_matches(device.name):
                 device.close()
                 continue
             capabilities = device.capabilities(absinfo=False)
@@ -67,7 +77,10 @@ def open_devices_until_available():
             )
             return devices
         if not logged_wait:
-            print(f'Waiting for input device named "{KEYBOARD_NAME}" with {ABS_CODE}.', flush=True)
+            if KEYBOARD_NAME_REGEX:
+                print(f'Waiting for input device matching "{KEYBOARD_NAME_REGEX}" with {ABS_CODE}.', flush=True)
+            else:
+                print(f'Waiting for input device named "{KEYBOARD_NAME}" with {ABS_CODE}.', flush=True)
             logged_wait = True
         time.sleep(2)
 

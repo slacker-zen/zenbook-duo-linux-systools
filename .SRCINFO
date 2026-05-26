@@ -1,29 +1,11 @@
-pkgbase = zenbook-duo-linux-systools
-	pkgdesc = ASUS Zenbook Duo helpers for Arch-based KDE Plasma Wayland systems
-	pkgver = 1.1
-	pkgrel = 1
+pkgbase = zenbook-duo-systools
+	pkgdesc = ASUS Zenbook Duo event matrix, Fn-key, display, power, and lid helpers
+	pkgver = 1.3
+	pkgrel = 3
 	url = https://github.com/nekropolit/zenbook-duo-linux-systools
+	install = zenbook-duo-systools.install
 	arch = any
 	license = MIT
-
-pkgname = zenbook-duo-systools
-	pkgdesc = ASUS Zenbook Duo system-state helper
-	install = sysstates/zenbook-duo-systools.install
-	depends = bash
-	depends = kscreen
-	depends = power-profiles-daemon
-	depends = qt6-tools
-	depends = sudo
-	depends = systemd
-	provides = zenbook-duo-linux-systools-sysstates=1.1
-	conflicts = zenbook-duo-linux-systools-sysstates
-	replaces = zenbook-duo-linux-systools-sysstates
-	backup = etc/zenbook-duo/duo-sysstates.conf
-	backup = etc/sudoers.d/zenbook-duo-systools
-
-pkgname = zenbook-duo-systools-fnkeys
-	pkgdesc = ASUS Zenbook Duo Fn-key and detachable keyboard helper
-	install = fnkeys/zenbook-duo-systools-fnkeys.install
 	depends = bash
 	depends = bluez-utils
 	depends = glib2
@@ -32,14 +14,25 @@ pkgname = zenbook-duo-systools-fnkeys
 	depends = libinput
 	depends = libnotify
 	depends = networkmanager
+	depends = power-profiles-daemon
 	depends = python-evdev
 	depends = python-pyusb
 	depends = qt6-tools
 	depends = sudo
 	depends = systemd
 	depends = usbutils
-	provides = zenbook-duo-linux-systools-fnkeys=1.1
+	provides = zenbook-duo-linux-systools-sysstates=1.3
+	provides = zenbook-duo-linux-systools-fnkeys=1.3
+	provides = zenbook-duo-systools-fnkeys=1.3
+	conflicts = zenbook-duo-systools-fnkeys
+	conflicts = zenbook-duo-linux-systools-sysstates
 	conflicts = zenbook-duo-linux-systools-fnkeys
+	replaces = zenbook-duo-systools-fnkeys
+	replaces = zenbook-duo-linux-systools-sysstates
 	replaces = zenbook-duo-linux-systools-fnkeys
+	backup = etc/zenbook-duo/duo-sysstates.conf
 	backup = etc/zenbook-duo/fnkeys.conf
+	backup = etc/sudoers.d/zenbook-duo-systools
 	backup = etc/sudoers.d/zenbook-duo-systools-fnkeys
+
+pkgname = zenbook-duo-systools
