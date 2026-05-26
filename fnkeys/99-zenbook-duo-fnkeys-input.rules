@@ -1,0 +1,3 @@
+# Allow the active logged-in user to read the Zenbook Duo detachable keyboard
+# input event node used for proprietary backlight up/down events.
+SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="ASUS Zenbook Duo Keyboard", TAG+="uaccess"

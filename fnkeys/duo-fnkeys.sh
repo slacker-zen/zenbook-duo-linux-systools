@@ -5,6 +5,7 @@ CONFIG_FILE="/etc/zenbook-duo/fnkeys.conf"
 HELPER_VERSION="1.1"
 TMP_DIR="/tmp/duo"
 BACKLIGHT_PY_SYSTEM="/usr/lib/zenbook-duo-fnkeys/backlight.py"
+INPUT_WATCHER_SYSTEM="/usr/lib/zenbook-duo-fnkeys/input_watcher.py"
 DEFAULT_BACKLIGHT=2
 DEFAULT_SCALE=1
 DEFAULT_MAIN_SCREEN="eDP-1"
@@ -17,6 +18,9 @@ DEFAULT_KEYBOARD_BT_MAC="E9:C7:F1:96:05:3C"
 DEFAULT_KEYBOARD_BT_NAME="ASUS Zenbook Duo Keyboard"
 DEFAULT_KEYBOARD_BT_ADAPTER="hci0"
 DEFAULT_KEYBOARD_BT_GATT_CHAR="service001b/char003b"
+DEFAULT_BACKLIGHT_UP_VALUE=16
+DEFAULT_BACKLIGHT_DOWN_VALUE=199
+DEFAULT_DISPLAY_BRIGHTNESS_STEP=20
 DEFAULT_LOWER_POSITION="0,1200"
 
 mkdir -p "${TMP_DIR}"
@@ -40,6 +44,13 @@ KEYBOARD_BT_NAME="${FNKEYS_KEYBOARD_BT_NAME:-$DEFAULT_KEYBOARD_BT_NAME}"
 KEYBOARD_BT_ADAPTER="${FNKEYS_KEYBOARD_BT_ADAPTER:-$DEFAULT_KEYBOARD_BT_ADAPTER}"
 KEYBOARD_BT_GATT_CHAR="${FNKEYS_KEYBOARD_BT_GATT_CHAR:-$DEFAULT_KEYBOARD_BT_GATT_CHAR}"
 KEYBOARD_BT_CHAR_PATH="${FNKEYS_KEYBOARD_BT_CHAR_PATH:-}"
+BACKLIGHT_INPUT_WATCH="${FNKEYS_BACKLIGHT_INPUT_WATCH:-true}"
+BACKLIGHT_UP_VALUE="${FNKEYS_BACKLIGHT_UP_VALUE:-$DEFAULT_BACKLIGHT_UP_VALUE}"
+BACKLIGHT_DOWN_VALUE="${FNKEYS_BACKLIGHT_DOWN_VALUE:-$DEFAULT_BACKLIGHT_DOWN_VALUE}"
+BACKLIGHT_EVENT_CODE="${FNKEYS_BACKLIGHT_EVENT_CODE:-ABS_MISC}"
+BACKLIGHT_STATE_FILE="${FNKEYS_BACKLIGHT_STATE_FILE:-${TMP_DIR}/kb-backlight-level}"
+BACKLIGHT_EVENT_DEBOUNCE_SECONDS="${FNKEYS_BACKLIGHT_EVENT_DEBOUNCE_SECONDS:-0.15}"
+DISPLAY_BRIGHTNESS_STEP="${FNKEYS_DISPLAY_BRIGHTNESS_STEP:-$DEFAULT_DISPLAY_BRIGHTNESS_STEP}"
 LOWER_POSITION="${FNKEYS_LOWER_POSITION:-$DEFAULT_LOWER_POSITION}"
 MANAGE_DISPLAY="${FNKEYS_MANAGE_DISPLAY:-true}"
 MANAGE_WIFI="${FNKEYS_MANAGE_WIFI:-false}"
@@ -297,6 +308,41 @@ function duo-ensure-backlight-script() {
   printf '%s' "${path}"
 }
 
+function duo-ensure-input-watcher-script() {
+  local path="${INPUT_WATCHER_SYSTEM}"
+  local source_dir
+  source_dir="$(dirname "${BASH_SOURCE[0]}")"
+
+  if [[ -x "${source_dir}/input_watcher.py" ]]; then
+    printf '%s' "${source_dir}/input_watcher.py"
+    return
+  fi
+
+  if [[ -x "${path}" ]]; then
+    printf '%s' "${path}"
+    return
+  fi
+
+  return 1
+}
+
+function duo-write-backlight-state() {
+  local state_dir
+  state_dir="$(dirname "${BACKLIGHT_STATE_FILE}")"
+  [[ -z "${state_dir}" || "${state_dir}" == "." ]] || mkdir -p "${state_dir}"
+  printf '%s' "${1}" >"${BACKLIGHT_STATE_FILE}"
+}
+
+function duo-read-backlight-state() {
+  local value
+  value="$(cat "${BACKLIGHT_STATE_FILE}" 2>/dev/null || true)"
+  if [[ "${value}" =~ ^[0-3]$ ]]; then
+    printf '%s' "${value}"
+    return
+  fi
+  duo-normalize-backlight-level "${BACKLIGHT_LEVEL}"
+}
+
 function duo-normalize-backlight-level() {
   local value="${1}"
   if [[ ! "${value}" =~ ^[0-3]$ ]]; then
@@ -304,6 +350,13 @@ function duo-normalize-backlight-level() {
     return 1
   fi
   printf '%s' "${value}"
+}
+
+function duo-cycle-kb-backlight() {
+  local current next
+  current="$(duo-read-backlight-state)"
+  next=$(( (current + 1) % 4 ))
+  duo-set-kb-backlight "${next}"
 }
 
 function duo-set-kb-backlight() {
@@ -330,6 +383,7 @@ function duo-set-kb-backlight() {
     else
       printf '%s' "${brightness}" | sudo ${TEE} "${led_path}" >/dev/null
     fi
+    duo-write-backlight-state "${target}"
     return
   fi
 
@@ -346,6 +400,7 @@ function duo-set-kb-backlight() {
     vendor=${keyboard_id%:*}
     product=${keyboard_id#*:}
     if sudo "${PYTHON3}" "${backlight_script}" usb "0x${vendor}" "0x${product}" "${target}" >/dev/null 2>&1; then
+      duo-write-backlight-state "${target}"
       return 0
     fi
   fi
@@ -354,6 +409,7 @@ function duo-set-kb-backlight() {
     local bt_char_path
     bt_char_path="$(duo-keyboard-bluetooth-char-path || true)"
     if [[ -n "${bt_char_path}" ]] && "${PYTHON3}" "${backlight_script}" bluetooth "${bt_char_path}" "${target}" >/dev/null 2>&1; then
+      duo-write-backlight-state "${target}"
       return 0
     fi
   fi
@@ -364,6 +420,82 @@ function duo-set-kb-backlight() {
     echo "Zenbook Duo keyboard backlight control failed over USB and Bluetooth."
   fi
   return 1
+}
+
+function duo-normalize-display-brightness-step() {
+  local value="${1}"
+  if [[ ! "${value}" =~ ^[0-9]+$ ]]; then
+    echo "Invalid display brightness step: ${value}. Expected 1-100." >&2
+    return 1
+  fi
+  if (( value < 1 || value > 100 )); then
+    echo "Invalid display brightness step: ${value}. Expected 1-100." >&2
+    return 1
+  fi
+  printf '%s' "${value}"
+}
+
+function duo-read-display-brightness-percent() {
+  local path="${1}"
+  local max current
+
+  [[ -r "${path}" ]] || return 1
+  max="$(cat "${path%/*}/max_brightness" 2>/dev/null || true)"
+  current="$(cat "${path}" 2>/dev/null || true)"
+
+  if [[ ! "${max}" =~ ^[0-9]+$ || "${max}" -le 0 || ! "${current}" =~ ^[0-9]+$ ]]; then
+    return 1
+  fi
+
+  printf '%s' "$(( (current * 100 + max / 2) / max ))"
+}
+
+function duo-write-display-brightness-percent() {
+  local path="${1}"
+  local percent="${2}"
+  local max brightness
+
+  [[ -e "${path}" ]] || return 0
+  max="$(cat "${path%/*}/max_brightness" 2>/dev/null || true)"
+  if [[ ! "${max}" =~ ^[0-9]+$ || "${max}" -le 0 ]]; then
+    return 1
+  fi
+
+  brightness=$(( max * percent / 100 ))
+  if (( percent > 0 && brightness < 1 )); then
+    brightness=1
+  fi
+  if (( brightness > max )); then
+    brightness=${max}
+  fi
+
+  if [[ -w "${path}" ]]; then
+    printf '%s' "${brightness}" >"${path}"
+  else
+    printf '%s' "${brightness}" | sudo ${TEE} "${path}" >/dev/null
+  fi
+}
+
+function duo-cycle-display-brightness() {
+  local step current next
+
+  step="$(duo-normalize-display-brightness-step "${DISPLAY_BRIGHTNESS_STEP}")"
+  current="$(duo-read-display-brightness-percent "${MAIN_BACKLIGHT_PATH}" || true)"
+  if [[ ! "${current}" =~ ^[0-9]+$ ]]; then
+    current=0
+  fi
+
+  if (( current >= 100 )); then
+    next="${step}"
+  else
+    next=$(( ((current / step) + 1) * step ))
+    if (( next > 100 )); then
+      next=100
+    fi
+  fi
+
+  duo-write-display-brightness-percent "${MAIN_BACKLIGHT_PATH}" "${next}"
+  duo-write-display-brightness-percent "${LOWER_BACKLIGHT_PATH}" "${next}"
 }
 
 function duo-set-kb-backlight-retry() {
@@ -638,6 +770,23 @@ function duo-watch-keyboard-bluetooth() {
   done
 }
 
+function duo-watch-keyboard-backlight-input() {
+  [[ "${BACKLIGHT_INPUT_WATCH}" == true ]] || return 0
+  [[ -n "${PYTHON3}" ]] || return 0
+
+  local input_watcher
+  input_watcher="$(duo-ensure-input-watcher-script || true)"
+  [[ -n "${input_watcher}" ]] || return 0
+
+  FNKEYS_KEYBOARD_INPUT_NAME="${KEYBOARD_BT_NAME}" \
+  FNKEYS_BACKLIGHT_EVENT_CODE="${BACKLIGHT_EVENT_CODE}" \
+  FNKEYS_BACKLIGHT_UP_VALUE="${BACKLIGHT_UP_VALUE}" \
+  FNKEYS_BACKLIGHT_DOWN_VALUE="${BACKLIGHT_DOWN_VALUE}" \
+  FNKEYS_BACKLIGHT_EVENT_DEBOUNCE_SECONDS="${BACKLIGHT_EVENT_DEBOUNCE_SECONDS}" \
+  FNKEYS_HELPER="${BASH_SOURCE[0]}" \
+    "${PYTHON3}" "${input_watcher}"
+}
+
 function duo-cli() {
   case "${1:-}" in
     pre|hibernate|shutdown)
@@ -649,6 +798,12 @@ function duo-cli() {
       ;;
     kbb)
       duo-set-kb-backlight "${2:-${BACKLIGHT_LEVEL}}"
+      ;;
+    kbb-cycle)
+      duo-cycle-kb-backlight
+      ;;
+    display-brightness-cycle)
+      duo-cycle-display-brightness
       ;;
     left-up)
       if [[ -n "${KSCREEN}" ]]; then
@@ -696,6 +851,7 @@ function main() {
   duo-watch-monitor &
   duo-watch-keyboard-state-poll &
   duo-watch-keyboard-bluetooth &
+  duo-watch-keyboard-backlight-input &
   duo-watch-display-backlight &
   duo-watch-wifi &
   duo-watch-bluetooth &

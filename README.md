@@ -32,6 +32,9 @@ Contains:
 
 - `duo-fnkeys.sh` — Fn-key helper script for keyboard attachment detection and backlight handling.
 - `fnkeys.conf` — standalone Fn-key helper configuration.
+- `backlight.py` — USB and Bluetooth GATT keyboard backlight helper.
+- `input_watcher.py` — evdev watcher for the physical keyboard backlight up/down keys.
+- `99-zenbook-duo-fnkeys-input.rules` — udev rule that lets the active user service read the keyboard input node.
 - `zenbook-duo-systools-fnkeys.service` — optional user service unit for Fn-key, USB, and Bluetooth keyboard events.
 - `setup-fnkeys.sh` — optional prerequisite installer for the Fn-key helper.
 - `sudoers-zenbook-duo-systools-fnkeys` — sudoers helper config for Fn-key backlight control.
@@ -115,7 +118,7 @@ cd fnkeys
 ./setup-fnkeys.sh
 ```
 
-This installs `/usr/bin/zenbook-duo-systools-fnkeys`, `/etc/zenbook-duo/fnkeys.conf`, the USB backlight helper, sudoers rules, the user service unit, and required packages.
+This installs `/usr/bin/zenbook-duo-systools-fnkeys`, `/etc/zenbook-duo/fnkeys.conf`, the USB/Bluetooth backlight helpers, the input watcher, sudoers rules, the user service unit, udev input permissions, and required packages.
 
 ## Configuration
 
@@ -153,10 +156,13 @@ Edit `fnkeys.conf` to adjust:
 - direct dock USB path and keyboard match pattern
 - Bluetooth keyboard identity, GATT backlight characteristic, and attached-mode Bluetooth preservation for Fn/media transport
 - detachable keyboard backlight level (`0-3`)
+- physical keyboard backlight key event watching (`ABS_MISC` values `16` and `199` by default) and display brightness cycle step
 
 The packaged default is `FNKEYS_BACKLIGHT_LEVEL=2`. The fnkeys user service applies that level on startup, after resume/boot commands, and whenever the docked USB keyboard attach event is observed. If `/etc/zenbook-duo/fnkeys.conf` already exists from an older install, update that file or merge the package `.pacnew` so it also contains `FNKEYS_BACKLIGHT_LEVEL=2`.
 
 Bluetooth backlight control uses BlueZ GATT through `bluetoothctl`, matching the working `zenbook-utils` implementation. If Bluetooth writes fail while the keyboard is connected, set `ExportClaimedServices = read-write` under `[GATT]` in `/etc/bluetooth/main.conf`, then restart Bluetooth.
+
+The physical backlight level keys on the detachable keyboard are proprietary ASUS input events, not standard key codes. The fnkeys package watches the `ASUS Zenbook Duo Keyboard` input node for `EV_ABS/ABS_MISC`; observed defaults are `16` for the physical backlight-up key and `199` for the physical backlight-down key. The backlight-down key cycles the keyboard backlight through levels `0-3`; the backlight-up key cycles both `eDP-1` and `eDP-2` display brightness in `20%` steps, wrapping from `100%` back to `20%`.
 
 ## Notes
 
@@ -176,6 +182,7 @@ The top-row key behavior can change with the keyboard connection mode and BIOS F
 - when the keyboard is directly attached on the dock connector, the USB keyboard interface emits real `F1`, `F2`, and so on
 - when directly attached, the keyboard can still keep a Bluetooth connection for Fn/media transport, so the Fn-key helper keeps Bluetooth unblocked in attached mode by default
 - the detachable keyboard backlight is set through kernel LED sysfs when available, USB HID when docked/wired, and the BlueZ GATT characteristic when only Bluetooth is connected
+- the detachable keyboard backlight keys are handled through the fnkeys evdev watcher, using the packaged udev rule to let the active user service read the input node; by default one key cycles keyboard backlight levels and the other cycles both display backlights in 20% steps
 - if the user explicitly blocks Bluetooth, the Fn-key helper respects that and falls back to dock USB only; in that mode the keyboard must be physically attached for regular function-key behavior
 
 Fn-lock settings in the BIOS can invert or normalize this behavior, so check that setting if the top row does not match the expected mode.

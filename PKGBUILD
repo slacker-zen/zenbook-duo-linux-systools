@@ -35,7 +35,7 @@ package_zenbook-duo-systools() {
 
 package_zenbook-duo-systools-fnkeys() {
   pkgdesc='ASUS Zenbook Duo Fn-key and detachable keyboard helper'
-  depends=(bash bluez-utils glib2 inotify-tools kscreen libinput libnotify networkmanager python-pyusb qt6-tools sudo systemd usbutils)
+  depends=(bash bluez-utils glib2 inotify-tools kscreen libinput libnotify networkmanager python-evdev python-pyusb qt6-tools sudo systemd usbutils)
   backup=(
     etc/zenbook-duo/fnkeys.conf
     etc/sudoers.d/zenbook-duo-systools-fnkeys
@@ -50,6 +50,8 @@ package_zenbook-duo-systools-fnkeys() {
   install -Dm440 "${startdir}/fnkeys/sudoers-zenbook-duo-systools-fnkeys" "${pkgdir}/etc/sudoers.d/zenbook-duo-systools-fnkeys"
   install -Dm644 "${startdir}/fnkeys/zenbook-duo-systools-fnkeys.service" "${pkgdir}/usr/lib/systemd/user/zenbook-duo-systools-fnkeys.service"
   install -Dm755 "${startdir}/fnkeys/backlight.py" "${pkgdir}/usr/lib/zenbook-duo-fnkeys/backlight.py"
+  install -Dm755 "${startdir}/fnkeys/input_watcher.py" "${pkgdir}/usr/lib/zenbook-duo-fnkeys/input_watcher.py"
+  install -Dm644 "${startdir}/fnkeys/99-zenbook-duo-fnkeys-input.rules" "${pkgdir}/usr/lib/udev/rules.d/99-zenbook-duo-fnkeys-input.rules"
   install -Dm644 "${startdir}/README.md" "${pkgdir}/usr/share/doc/zenbook-duo-systools-fnkeys/README.md"
   install -Dm644 "${startdir}/LICENSE" "${pkgdir}/usr/share/licenses/zenbook-duo-systools-fnkeys/LICENSE"
 }
