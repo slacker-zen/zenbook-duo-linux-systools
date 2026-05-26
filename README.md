@@ -260,3 +260,6 @@ The top-row key behavior can change with the keyboard connection mode and BIOS F
 - if the user explicitly blocks Bluetooth, the Fn-key helper respects that and falls back to dock USB only; in that mode the keyboard must be physically attached for regular function-key behavior
 
 Fn-lock settings in the BIOS can invert or normalize this behavior, so check that setting if the top row does not match the expected mode.
+
+## Credits
+See [credits.md](./3rd_src/credits.md)
