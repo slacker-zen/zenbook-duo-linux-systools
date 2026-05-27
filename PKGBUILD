@@ -2,7 +2,7 @@
 
 pkgname=zenbook-duo-systools
 pkgver=1.3
-pkgrel=6
+pkgrel=10
 pkgdesc='ASUS Zenbook Duo event matrix, Fn-key, display, power, lid, and tray helpers'
 arch=(x86_64)
 url='https://github.com/nekropolit/zenbook-duo-linux-systools'
@@ -59,10 +59,7 @@ sha256sums=()
 build() {
   cd "${startdir}/ui"
   npm install --no-package-lock
-  npm run build
-
-  cd "${startdir}/ui/src-tauri"
-  cargo build --release --locked
+  npm run tauri -- build --no-bundle -- --locked
 }
 
 package() {

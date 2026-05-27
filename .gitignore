@@ -1,5 +1,5 @@
 pkg/
-src/
+/src/
 *.pkg.tar.*
 *.log
 ui/node_modules/

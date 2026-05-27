@@ -15,6 +15,7 @@ MAIN_SCREEN="eDP-1"
 LOWER_SCREEN="eDP-2"
 MAIN_BACKLIGHT_PATH="/sys/class/backlight/intel_backlight/brightness"
 LOWER_BACKLIGHT_PATH="/sys/class/backlight/card1-eDP-2-backlight/brightness"
+FNKEYS_BACKLIGHT_STATE_FILE="/tmp/duo/kb-backlight-level"
 
 if [[ ! -e "${MATRIX_HELPER}" && -x "${REPO_ROOT}/coordinator/zenbook-duo-matrix.sh" ]]; then
   MATRIX_HELPER="${REPO_ROOT}/coordinator/zenbook-duo-matrix.sh"
@@ -44,6 +45,39 @@ load_display_config() {
   LOWER_BACKLIGHT_PATH="${FNKEYS_LOWER_BACKLIGHT_PATH:-${LOWER_BACKLIGHT_PATH}}"
 }
 
+load_backlight_config() {
+  if [[ -f "${SYS_CONFIG_FILE}" ]]; then
+    # shellcheck source=/dev/null
+    source "${SYS_CONFIG_FILE}"
+  fi
+  if [[ -f "${FN_CONFIG_FILE}" ]]; then
+    # shellcheck source=/dev/null
+    source "${FN_CONFIG_FILE}"
+  fi
+}
+
+read_builtin_keyboard_backlight_percent() {
+  local led_path="" max="" value=""
+  led_path="$(find /sys/class/leds -maxdepth 2 -type f \( -iname '*kbd*' -o -iname '*keyboard*' -o -iname '*asus*' \) -name brightness | head -n1 || true)"
+  [[ -n "${led_path}" && -r "${led_path}" && -r "${led_path%/*}/max_brightness" ]] || return 0
+
+  max="$(cat "${led_path%/*}/max_brightness" 2>/dev/null || true)"
+  value="$(cat "${led_path}" 2>/dev/null || true)"
+  if [[ "${max}" =~ ^[0-9]+$ && "${value}" =~ ^[0-9]+$ && "${max}" -gt 0 ]]; then
+    printf '%s' "$(( value * 100 / max ))"
+  fi
+}
+
+read_detachable_keyboard_backlight_level() {
+  local value=""
+  value="$(cat "${FNKEYS_BACKLIGHT_STATE_FILE}" 2>/dev/null || true)"
+  if [[ "${value}" =~ ^[0-3]$ ]]; then
+    printf '%s' "${value}"
+  elif [[ "${FNKEYS_BACKLIGHT_LEVEL:-}" =~ ^[0-3]$ ]]; then
+    printf '%s' "${FNKEYS_BACKLIGHT_LEVEL}"
+  fi
+}
+
 run_helper() {
   local helper="$1"
   shift
@@ -66,11 +100,19 @@ run_helper() {
 }
 
 status_json() {
-  local matrix_output="" sysstates_output=""
+  load_backlight_config
+
+  local matrix_output="" sysstates_output="" builtin_backlight="" detachable_backlight=""
   matrix_output="$(run_helper matrix status 2>&1 || true)"
   sysstates_output="$(run_helper sysstates status 2>&1 || true)"
+  builtin_backlight="$(read_builtin_keyboard_backlight_percent)"
+  detachable_backlight="$(read_detachable_keyboard_backlight_level)"
 
-  MATRIX_OUTPUT="${matrix_output}" SYSSTATES_OUTPUT="${sysstates_output}" python3 - <<'PY'
+  MATRIX_OUTPUT="${matrix_output}" \
+  SYSSTATES_OUTPUT="${sysstates_output}" \
+  BUILTIN_KEYBOARD_BACKLIGHT="${builtin_backlight}" \
+  DETACHABLE_KEYBOARD_BACKLIGHT="${detachable_backlight}" \
+  python3 - <<'PY'
 import json
 import os
 
@@ -83,6 +125,11 @@ for line in os.environ.get("MATRIX_OUTPUT", "").splitlines():
 print(json.dumps({
     "matrix": matrix,
     "sysstates": os.environ.get("SYSSTATES_OUTPUT", ""),
+    "keyboard_backlight": {
+        "built_in_percent": int(os.environ["BUILTIN_KEYBOARD_BACKLIGHT"]) if os.environ.get("BUILTIN_KEYBOARD_BACKLIGHT", "").isdigit() else None,
+        "detachable_level": int(os.environ["DETACHABLE_KEYBOARD_BACKLIGHT"]) if os.environ.get("DETACHABLE_KEYBOARD_BACKLIGHT", "").isdigit() else None,
+        "detachable_max": 3,
+    },
 }, separators=(",", ":")))
 PY
 }
