@@ -1,0 +1,12 @@
+Package: zenbook-duo-systools
+Version: @VERSION@
+Section: utils
+Priority: optional
+Architecture: @ARCH@
+Maintainer: nekropolit <m.zenker@userart.net>
+Depends: bash, bluez, inotify-tools, kscreen, libayatana-appindicator3-1, libglib2.0-bin, libgtk-3-0, libinput-tools, libnotify-bin, libwebkit2gtk-4.1-0, network-manager, power-profiles-daemon, python3-evdev, python3-usb, qt6-tools-dev-tools, sudo, systemd, usbutils
+Conflicts: zenbook-duo-systools-fnkeys, zenbook-duo-linux-systools-sysstates, zenbook-duo-linux-systools-fnkeys
+Replaces: zenbook-duo-systools-fnkeys, zenbook-duo-linux-systools-sysstates, zenbook-duo-linux-systools-fnkeys
+Description: ASUS Zenbook Duo event matrix and helper tools
+ User-session event matrix, Fn-key, display, power, lid, and tray helpers for
+ ASUS Zenbook Duo systems on Zorin/Ubuntu-family distributions.

@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+set -e
+
+cleanup_legacy_units() {
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl disable --now zenbook-duo.service >/dev/null 2>&1 || true
+    systemctl --global disable zenbook-duo-user.service >/dev/null 2>&1 || true
+    systemctl --global disable zenbook-duo-systools-user.service >/dev/null 2>&1 || true
+    systemctl --global disable zenbook-duo-systools-fnkeys.service >/dev/null 2>&1 || true
+    systemctl daemon-reload >/dev/null 2>&1 || true
+  fi
+
+  rm -f \
+    /etc/systemd/system/zenbook-duo.service \
+    /etc/systemd/user/zenbook-duo-user.service \
+    /etc/systemd/user/zenbook-duo-systools-user.service \
+    /etc/systemd/user/zenbook-duo-systools-fnkeys.service \
+    /usr/local/bin/duo \
+    /usr/lib/systemd/system-sleep/duo \
+    /etc/sudoers.d/zenbook-duo \
+    /etc/udev/rules.d/99-zenbook-duo-fnkeys-input.rules
+}
+
+reload_udev_rules() {
+  if command -v udevadm >/dev/null 2>&1; then
+    udevadm control --reload-rules >/dev/null 2>&1 || true
+    udevadm trigger --subsystem-match=input >/dev/null 2>&1 || true
+  fi
+}
+
+case "${1:-configure}" in
+  configure)
+    cleanup_legacy_units
+    reload_udev_rules
+    if command -v systemctl >/dev/null 2>&1; then
+      systemctl daemon-reload >/dev/null 2>&1 || true
+    fi
+    cat <<'EOF'
+zenbook-duo-systools installed.
+
+Enable the system power/lid policy:
+  sudo systemctl enable --now zenbook-duo-systools.service
+
+Enable the user-session matrix:
+  systemctl --user daemon-reload
+  systemctl --user enable --now zenbook-duo-matrix.service
+
+Check matrix state:
+  zenbook-duo-matrix status
+EOF
+    ;;
+esac
+
+exit 0

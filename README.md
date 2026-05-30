@@ -81,17 +81,35 @@ This boundary is intentional. KDE/Wayland display control belongs to the active 
 
 ### Build Package
 
-From the repository root:
+On Arch/CachyOS, from the repository root:
 
 ```bash
 makepkg -f
 ```
 
-This builds one package:
+This builds one pacman package:
 
 - `zenbook-duo-systools`
 
 The package metadata conflicts with and replaces the earlier split package names. The install script removes old hand-made `duo` service entries and disables the older duplicate user services.
+
+On Zorin/Ubuntu-family distributions, build a Debian package instead:
+
+```bash
+./packaging/debian/build-deb.sh --install-prereqs
+```
+
+This creates:
+
+- `dist/zenbook-duo-systools_1.3-10_amd64.deb`
+
+Install it with:
+
+```bash
+sudo apt install ./dist/zenbook-duo-systools_1.3-10_amd64.deb
+```
+
+The Debian package declares the equivalent apt dependencies for BlueZ, KDE kscreen, notifications, Python evdev/PyUSB, systemd, WebKit/GTK, and the tray UI runtime. The Arch `PKGBUILD` remains the CachyOS/Arch package path.
 
 ### Run the core helper
 
@@ -115,6 +133,7 @@ cd sysstates
 ```
 
 This installs `/usr/bin/zenbook-duo-systools`, `/etc/zenbook-duo/duo-sysstates.conf`, sudoers rules, the system power/lid unit, the sleep hook, and required packages.
+The setup script detects Arch/CachyOS versus Zorin/Ubuntu/Debian and installs prerequisites with `pacman` or `apt-get` accordingly.
 
 The system service also owns the lid-close policy. It inhibits logind's default lid handling while active, switches keyboard backlight off first, then suspends while charging/on AC or hibernates while discharging/on battery:
 
@@ -159,18 +178,24 @@ cd fnkeys
 
 ### Install the package
 
-From the repository root after `makepkg -f`:
+On Arch/CachyOS, from the repository root after `makepkg -f`:
 
 ```bash
 sudo pacman -R --noconfirm zenbook-duo-systools-fnkeys
-sudo pacman -U --noconfirm zenbook-duo-systools-1.3-2-any.pkg.tar.zst
+sudo pacman -U --noconfirm zenbook-duo-systools-1.3-10-x86_64.pkg.tar.zst
 ```
 
 If you previously used the setup script before `input_watcher.py` was packaged, pacman may report that `/usr/lib/zenbook-duo-fnkeys/input_watcher.py` exists in the filesystem. That stale helper is not package-owned; upgrade with:
 
 ```bash
 sudo pacman -R --noconfirm zenbook-duo-systools-fnkeys
-sudo pacman -U --overwrite usr/lib/zenbook-duo-fnkeys/input_watcher.py zenbook-duo-systools-1.3-2-any.pkg.tar.zst
+sudo pacman -U --overwrite usr/lib/zenbook-duo-fnkeys/input_watcher.py zenbook-duo-systools-1.3-10-x86_64.pkg.tar.zst
+```
+
+On Zorin/Ubuntu-family distributions, from the repository root after `./packaging/debian/build-deb.sh --install-prereqs`:
+
+```bash
+sudo apt install ./dist/zenbook-duo-systools_1.3-10_amd64.deb
 ```
 
 The matrix service should be the only user-session owner of display and keyboard events. Keep the system `zenbook-duo-systools.service` enabled for lid/power policy, but disable the older user watchers when using the matrix:

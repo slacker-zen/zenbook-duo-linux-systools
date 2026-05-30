@@ -13,21 +13,11 @@ SERVICE_LOCATION=/etc/systemd/user/zenbook-duo-matrix.service
 UDEV_RULE_LOCATION=/etc/udev/rules.d/72-zenbook-duo-fnkeys-input.rules
 DEV_MODE=false
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 DEV_INSTALL_LOCATION="${SCRIPT_DIR}/duo-fnkeys.sh"
-PACKAGES=(
-    bluez-utils
-    glib2
-    inotify-tools
-    kscreen
-    libinput
-    libnotify
-    networkmanager
-    python-evdev
-    python-pyusb
-    qt6-tools
-    sudo
-    usbutils
-)
+
+# shellcheck source=../scripts/pkg-env.sh
+source "${REPO_DIR}/scripts/pkg-env.sh"
 
 if [[ "${1:-}" == "--dev-mode" ]]; then
     DEV_MODE=true
@@ -35,7 +25,7 @@ if [[ "${1:-}" == "--dev-mode" ]]; then
 fi
 
 if [[ "${DEV_MODE}" == false ]]; then
-    sudo pacman -Sy --needed --noconfirm "${PACKAGES[@]}"
+    zbd_install_prerequisites fnkeys
     sudo install -Dm755 "${SCRIPT_DIR}/duo-fnkeys.sh" "${INSTALL_LOCATION}"
     sudo install -Dm755 "${SCRIPT_DIR}/../coordinator/zenbook-duo-matrix.sh" "${MATRIX_LOCATION}"
     sudo install -Dm644 "${SCRIPT_DIR}/fnkeys.conf" "${CONFIG_LOCATION}"

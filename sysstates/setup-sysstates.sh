@@ -6,19 +6,16 @@ set -euo pipefail
 # events run through zenbook-duo-matrix.service.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 INSTALL_LOCATION=/usr/bin/zenbook-duo-systools
 CONFIG_LOCATION=/etc/zenbook-duo/duo-sysstates.conf
 SUDOERS_LOCATION=/etc/sudoers.d/zenbook-duo-systools
 SYSTEM_SERVICE_LOCATION=/etc/systemd/system/zenbook-duo-systools.service
 SLEEP_HOOK_LOCATION=/usr/lib/systemd/system-sleep/zenbook-duo-systools
 DEV_MODE=false
-PACKAGES=(
-  bluez-utils
-  kscreen
-  power-profiles-daemon
-  qt6-tools
-  sudo
-)
+
+# shellcheck source=../scripts/pkg-env.sh
+source "${REPO_DIR}/scripts/pkg-env.sh"
 
 if [[ "${1:-}" == "--dev-mode" ]]; then
   DEV_MODE=true
@@ -26,7 +23,7 @@ if [[ "${1:-}" == "--dev-mode" ]]; then
 fi
 
 if [[ "${DEV_MODE}" == false ]]; then
-  sudo pacman -Sy --needed --noconfirm "${PACKAGES[@]}"
+  zbd_install_prerequisites sysstates
   sudo install -Dm755 "${SCRIPT_DIR}/duo-sysstates.sh" "${INSTALL_LOCATION}"
   sudo install -Dm644 "${SCRIPT_DIR}/duo-sysstates.conf" "${CONFIG_LOCATION}"
   sudo install -Dm440 "${SCRIPT_DIR}/sudoers-zenbook-duo-systools" "${SUDOERS_LOCATION}"
