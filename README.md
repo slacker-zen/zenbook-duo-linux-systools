@@ -15,7 +15,7 @@ These scripts are intended for Arch-based Linux distributions and were developed
 
 - `sysstates`: `1.1`
 - `fnkeys`: `1.2`
-- `matrix`: `1.0`
+- `matrix`: `1.1`
 
 ## Directory layout
 
@@ -263,6 +263,7 @@ The event matrix derives state first, then dispatches:
 - keyboard backlight is reapplied only when transport changes to a present keyboard
 - physical backlight keys are still handled through the evdev watcher and invoke the narrow fnkeys subcommands
 - by default the physical `ABS_MISC` watcher only runs for `transport=bluetooth`; ordinary USB cradle transport does not expose the same proprietary event path and is skipped to avoid idle polling
+- after a direct dock detach, the matrix reconnects the Bluetooth keyboard by default so BlueZ rebuilds the HID input nodes cleanly; this protects against stale HID state after attached-mode USB interface unbind tests where Enter, touchpad clicks, or mouse clicks can stop producing events
 
 ## Notes
 

@@ -3,7 +3,7 @@ set -euo pipefail
 
 SYS_CONFIG_FILE="/etc/zenbook-duo/duo-sysstates.conf"
 FN_CONFIG_FILE="/etc/zenbook-duo/fnkeys.conf"
-HELPER_VERSION="1.0"
+HELPER_VERSION="1.1"
 
 MAIN_HELPER="${ZENBOOK_DUO_SYSTOOLS:-/usr/bin/zenbook-duo-systools}"
 FNKEYS_HELPER="${ZENBOOK_DUO_FNKEYS:-/usr/bin/zenbook-duo-systools-fnkeys}"
@@ -29,6 +29,8 @@ APPLY_KEYBOARD_BACKLIGHT=true
 WATCH_BLUETOOTH=true
 WATCH_USB=true
 POLL_INTERVAL_SECONDS=5
+RECONNECT_BLUETOOTH_ON_DETACH=true
+BLUETOOTH_RECONNECT_DELAY_SECONDS=1
 
 PYTHON3="$(command -v python3 || true)"
 BLUETOOTHCTL="$(command -v bluetoothctl || true)"
@@ -67,6 +69,8 @@ load_config() {
   WATCH_BLUETOOTH="${ZENBOOK_DUO_MATRIX_WATCH_BLUETOOTH:-${WATCH_BLUETOOTH}}"
   WATCH_USB="${ZENBOOK_DUO_MATRIX_WATCH_USB:-${WATCH_USB}}"
   POLL_INTERVAL_SECONDS="${ZENBOOK_DUO_MATRIX_POLL_INTERVAL_SECONDS:-${POLL_INTERVAL_SECONDS}}"
+  RECONNECT_BLUETOOTH_ON_DETACH="${ZENBOOK_DUO_MATRIX_RECONNECT_BLUETOOTH_ON_DETACH:-${RECONNECT_BLUETOOTH_ON_DETACH}}"
+  BLUETOOTH_RECONNECT_DELAY_SECONDS="${ZENBOOK_DUO_MATRIX_BLUETOOTH_RECONNECT_DELAY_SECONDS:-${BLUETOOTH_RECONNECT_DELAY_SECONDS}}"
 }
 
 emit_event() {
@@ -184,6 +188,20 @@ apply_keyboard_backlight() {
   "${FNKEYS_HELPER}" kbb "${BACKLIGHT_LEVEL}" || true
 }
 
+reconnect_bluetooth_keyboard_after_detach() {
+  [[ "${RECONNECT_BLUETOOTH_ON_DETACH}" == true ]] || return 0
+  [[ -n "${BLUETOOTHCTL}" ]] || return 0
+  [[ -n "${KEYBOARD_BT_MAC}" ]] || return 0
+
+  (
+    log "Reconnecting Bluetooth keyboard after dock detach"
+    "${BLUETOOTHCTL}" disconnect "${KEYBOARD_BT_MAC}" >/dev/null 2>&1 || true
+    sleep "${BLUETOOTH_RECONNECT_DELAY_SECONDS}"
+    "${BLUETOOTHCTL}" connect "${KEYBOARD_BT_MAC}" >/dev/null 2>&1 || true
+    emit_event bluetooth
+  ) &
+}
+
 transport_in_list() {
   local needle="$1"
   local item
@@ -264,6 +282,9 @@ reconcile() {
 
   if [[ "${current_mode}" != "${previous_mode}" ]]; then
     apply_display_mode "${current_mode}"
+    if [[ "${previous_mode}" == "attached" && "${current_mode}" == "detached" ]]; then
+      reconnect_bluetooth_keyboard_after_detach
+    fi
   fi
 
   if [[ "${current_transport}" != "${previous_transport}" && "${current_transport}" != "absent" ]]; then
