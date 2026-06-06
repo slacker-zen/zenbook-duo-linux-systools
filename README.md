@@ -167,6 +167,20 @@ From the repository root:
 
 The tray/UI should call this control layer instead of calling the individual helper scripts directly.
 
+### Diagnose UI hangs and helper errors
+
+The UI, control layer, and matrix write trace logs under:
+
+```bash
+${ZENBOOK_DUO_LOG_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/zenbook-duo}
+```
+
+Useful files are `ui.log`, `control.log`, and `matrix.log`. The UI also bounds helper calls with a timeout so stalled helper processes do not freeze tray actions; override the default 20 seconds with:
+
+```bash
+ZENBOOK_DUO_UI_COMMAND_TIMEOUT_SECONDS=30
+```
+
 ### Run the Fn-key helper directly
 
 From the `fnkeys/` directory:

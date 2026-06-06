@@ -10,6 +10,8 @@ REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 MATRIX_HELPER="${ZENBOOK_DUO_MATRIX:-/usr/bin/zenbook-duo-matrix}"
 SYSSTATES_HELPER="${ZENBOOK_DUO_SYSTOOLS:-/usr/bin/zenbook-duo-systools}"
 FNKEYS_HELPER="${ZENBOOK_DUO_FNKEYS:-/usr/bin/zenbook-duo-systools-fnkeys}"
+LOG_DIR="${ZENBOOK_DUO_LOG_DIR:-${XDG_STATE_HOME:-${HOME:-/tmp}/.local/state}/zenbook-duo}"
+LOG_FILE="${LOG_DIR}/control.log"
 
 MAIN_SCREEN="eDP-1"
 LOWER_SCREEN="eDP-2"
@@ -32,6 +34,15 @@ fi
 if [[ ! -f "${FN_CONFIG_FILE}" && -f "${REPO_ROOT}/fnkeys/fnkeys.conf" ]]; then
   FN_CONFIG_FILE="${REPO_ROOT}/fnkeys/fnkeys.conf"
 fi
+
+mkdir -p "${LOG_DIR}" 2>/dev/null || true
+
+log() {
+  local message="$*"
+  local stamp=""
+  stamp="$(date '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null || date +%s)"
+  printf '[%s] [zenbook-duo-control] %s\n' "${stamp}" "${message}" >>"${LOG_FILE}" 2>/dev/null || true
+}
 
 load_display_config() {
   if [[ -f "${FN_CONFIG_FILE}" ]]; then
@@ -81,22 +92,29 @@ read_detachable_keyboard_backlight_level() {
 run_helper() {
   local helper="$1"
   shift
+  local status=0 started=0 elapsed=0
 
+  started="$(date +%s)"
+  log "helper start helper=${helper} args=$*"
   case "${helper}" in
     matrix)
-      "${MATRIX_HELPER}" "$@"
+      "${MATRIX_HELPER}" "$@" || status=$?
       ;;
     sysstates)
-      "${SYSSTATES_HELPER}" "$@"
+      "${SYSSTATES_HELPER}" "$@" || status=$?
       ;;
     fnkeys)
-      "${FNKEYS_HELPER}" "$@"
+      "${FNKEYS_HELPER}" "$@" || status=$?
       ;;
     *)
       printf 'Unknown helper: %s\n' "${helper}" >&2
+      log "helper unknown helper=${helper}"
       return 2
       ;;
   esac
+  elapsed=$(( $(date +%s) - started ))
+  log "helper done helper=${helper} status=${status} elapsed=${elapsed}s args=$*"
+  return "${status}"
 }
 
 status_json() {

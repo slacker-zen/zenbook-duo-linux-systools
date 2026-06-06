@@ -11,6 +11,8 @@ INPUT_WATCHER_SYSTEM="/usr/lib/zenbook-duo-fnkeys/input_watcher.py"
 STATE_DIR="${XDG_RUNTIME_DIR:-/tmp}/zenbook-duo"
 EVENT_FIFO="${STATE_DIR}/matrix-events"
 STATE_FILE="${STATE_DIR}/matrix-state"
+LOG_DIR="${ZENBOOK_DUO_LOG_DIR:-${XDG_STATE_HOME:-${HOME:-/tmp}/.local/state}/zenbook-duo}"
+LOG_FILE="${LOG_DIR}/matrix.log"
 
 KEYBOARD_USB_MATCH="Primax|ASUS.*Keyboard|ASUSTeK.*Keyboard|Zenbook Duo.*Keyboard|0b05:1b2[cd]"
 KEYBOARD_DOCK_USB_PATH="3-6"
@@ -35,11 +37,17 @@ BLUETOOTH_RECONNECT_DELAY_SECONDS=1
 PYTHON3="$(command -v python3 || true)"
 BLUETOOTHCTL="$(command -v bluetoothctl || true)"
 INPUT_WATCHER_PID=""
+SERVICE_MODE=false
 
 mkdir -p "${STATE_DIR}"
+mkdir -p "${LOG_DIR}" 2>/dev/null || true
 
 log() {
-  printf '[zenbook-duo-matrix] %s\n' "$*"
+  local message="$*"
+  local stamp=""
+  stamp="$(date '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null || date +%s)"
+  printf '[zenbook-duo-matrix] %s\n' "${message}"
+  printf '[%s] [zenbook-duo-matrix] %s\n' "${stamp}" "${message}" >>"${LOG_FILE}" 2>/dev/null || true
 }
 
 load_config() {
@@ -175,17 +183,42 @@ save_state() {
   printf '%s\n' "${1}" >"${STATE_FILE}"
 }
 
+run_logged() {
+  local label="$1"
+  shift
+  local started=0 status=0 elapsed=0
+
+  started="$(date +%s)"
+  log "${label} start: $*"
+  "$@" || status=$?
+  elapsed=$(( $(date +%s) - started ))
+  log "${label} done: status=${status} elapsed=${elapsed}s"
+  return "${status}"
+}
+
 apply_display_mode() {
   local mode="$1"
-  [[ "${MANAGE_DISPLAY}" == true ]] || return 0
-  [[ -x "${MAIN_HELPER}" ]] || return 0
-  "${MAIN_HELPER}" display "${mode}" || true
+  if [[ "${MANAGE_DISPLAY}" != true ]]; then
+    log "Display layout management disabled; skip mode=${mode}"
+    return 0
+  fi
+  if [[ ! -x "${MAIN_HELPER}" ]]; then
+    log "Display helper not executable: ${MAIN_HELPER}"
+    return 0
+  fi
+  run_logged "display ${mode}" "${MAIN_HELPER}" display "${mode}" || true
 }
 
 apply_keyboard_backlight() {
-  [[ "${APPLY_KEYBOARD_BACKLIGHT}" == true ]] || return 0
-  [[ -x "${FNKEYS_HELPER}" ]] || return 0
-  "${FNKEYS_HELPER}" kbb "${BACKLIGHT_LEVEL}" || true
+  if [[ "${APPLY_KEYBOARD_BACKLIGHT}" != true ]]; then
+    log "Keyboard backlight reapply disabled"
+    return 0
+  fi
+  if [[ ! -x "${FNKEYS_HELPER}" ]]; then
+    log "Fnkeys helper not executable: ${FNKEYS_HELPER}"
+    return 0
+  fi
+  run_logged "keyboard backlight ${BACKLIGHT_LEVEL}" "${FNKEYS_HELPER}" kbb "${BACKLIGHT_LEVEL}" || true
 }
 
 reconnect_bluetooth_keyboard_after_detach() {
@@ -195,9 +228,9 @@ reconnect_bluetooth_keyboard_after_detach() {
 
   (
     log "Reconnecting Bluetooth keyboard after dock detach"
-    "${BLUETOOTHCTL}" disconnect "${KEYBOARD_BT_MAC}" >/dev/null 2>&1 || true
+    run_logged "bluetooth disconnect ${KEYBOARD_BT_MAC}" "${BLUETOOTHCTL}" disconnect "${KEYBOARD_BT_MAC}" >/dev/null 2>&1 || true
     sleep "${BLUETOOTH_RECONNECT_DELAY_SECONDS}"
-    "${BLUETOOTHCTL}" connect "${KEYBOARD_BT_MAC}" >/dev/null 2>&1 || true
+    run_logged "bluetooth connect ${KEYBOARD_BT_MAC}" "${BLUETOOTHCTL}" connect "${KEYBOARD_BT_MAC}" >/dev/null 2>&1 || true
     emit_event bluetooth
   ) &
 }
@@ -253,6 +286,11 @@ stop_input_watcher() {
 reconcile_input_watcher() {
   local transport="$1"
 
+  if [[ "${SERVICE_MODE}" != true ]]; then
+    log "Input watcher reconciliation skipped outside service mode"
+    return 0
+  fi
+
   if transport_in_list "${transport}"; then
     start_input_watcher
   else
@@ -264,6 +302,7 @@ reconcile() {
   local reason="${1:-event}"
   local current previous current_mode previous_mode current_transport previous_transport
 
+  log "Reconcile start: reason=${reason}"
   current="$(derive_state)"
   previous="$(load_last_state)"
   current_mode="$(state_value "${current}" physical_mode)"
@@ -271,9 +310,12 @@ reconcile() {
   current_transport="$(state_value "${current}" transport)"
   previous_transport="$(state_value "${previous}" transport)"
 
+  log "Derived state: mode=${current_mode} transport=${current_transport} usb_present=$(state_value "${current}" usb_present) bt_connected=$(state_value "${current}" bt_connected)"
+
   reconcile_input_watcher "${current_transport}"
 
   if [[ "${current}" == "${previous}" ]]; then
+    log "Reconcile done: no state change"
     return 0
   fi
 
@@ -291,6 +333,7 @@ reconcile() {
     apply_keyboard_backlight
   fi
 
+  log "Reconcile done: state changed"
 }
 
 watch_usb() {
@@ -327,6 +370,8 @@ stop_children() {
 }
 
 run_service() {
+  log "Service starting"
+  SERVICE_MODE=true
   rm -f "${EVENT_FIFO}"
   mkfifo "${EVENT_FIFO}"
   trap stop_children INT TERM EXIT
@@ -338,6 +383,7 @@ run_service() {
   watch_poll &
 
   while IFS= read -r event; do
+    log "Event received: ${event}"
     reconcile "${event}"
   done <&3
 }

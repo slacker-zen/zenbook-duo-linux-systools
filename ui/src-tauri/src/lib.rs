@@ -2,11 +2,12 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     env, fs,
+    io::Write,
     path::{Path, PathBuf},
-    process::Command,
+    process::{Command, Stdio},
     sync::Mutex,
     thread,
-    time::Duration,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
@@ -100,6 +101,8 @@ struct TrayMenuItems {
     keyboard: MenuItem<Wry>,
 }
 
+const DEFAULT_CONTROL_TIMEOUT: Duration = Duration::from_secs(20);
+
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -121,6 +124,55 @@ fn control_path() -> PathBuf {
     }
 }
 
+fn state_dir() -> PathBuf {
+    if let Ok(path) = env::var("ZENBOOK_DUO_LOG_DIR") {
+        return PathBuf::from(path);
+    }
+    if let Ok(path) = env::var("XDG_STATE_HOME") {
+        return PathBuf::from(path).join("zenbook-duo");
+    }
+    if let Ok(home) = env::var("HOME") {
+        return PathBuf::from(home).join(".local/state/zenbook-duo");
+    }
+    env::temp_dir().join("zenbook-duo")
+}
+
+fn log_path() -> PathBuf {
+    state_dir().join("ui.log")
+}
+
+fn timestamp() -> String {
+    let seconds = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0);
+    seconds.to_string()
+}
+
+fn append_log(message: impl AsRef<str>) {
+    let path = log_path();
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+
+    if let Ok(mut file) = fs::OpenOptions::new().create(true).append(true).open(&path) {
+        let _ = writeln!(file, "[{}] {}", timestamp(), message.as_ref());
+    }
+}
+
+fn control_timeout() -> Duration {
+    env::var("ZENBOOK_DUO_UI_COMMAND_TIMEOUT_SECONDS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|seconds| *seconds > 0)
+        .map(Duration::from_secs)
+        .unwrap_or(DEFAULT_CONTROL_TIMEOUT)
+}
+
+fn display_args(args: &[String]) -> String {
+    args.join(" ")
+}
+
 fn run_control(args: &[String]) -> Result<String, String> {
     let path = control_path();
     let mut command = if path.extension().is_some_and(|extension| extension == "sh") {
@@ -131,13 +183,65 @@ fn run_control(args: &[String]) -> Result<String, String> {
         Command::new(&path)
     };
 
-    let output = command
+    let timeout = control_timeout();
+    append_log(format!(
+        "control start path={} args=\"{}\" timeout={}s",
+        path.display(),
+        display_args(args),
+        timeout.as_secs()
+    ));
+
+    let mut child = command
         .args(args)
-        .output()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .map_err(|error| format!("Failed to run {}: {error}", path.display()))?;
 
+    let started = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if started.elapsed() >= timeout => {
+                let pid = child.id();
+                let _ = child.kill();
+                let _ = child.wait();
+                let message = format!(
+                    "Timed out after {}s running {} {}",
+                    timeout.as_secs(),
+                    path.display(),
+                    display_args(args)
+                );
+                append_log(format!(
+                    "control timeout pid={pid} args=\"{}\"",
+                    display_args(args)
+                ));
+                return Err(message);
+            }
+            Ok(None) => thread::sleep(Duration::from_millis(50)),
+            Err(error) => {
+                append_log(format!(
+                    "control wait failed args=\"{}\" error={error}",
+                    display_args(args)
+                ));
+                return Err(format!("Failed waiting for {}: {error}", path.display()));
+            }
+        }
+    }
+
+    let output = child
+        .wait_with_output()
+        .map_err(|error| format!("Failed to read {} output: {error}", path.display()))?;
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    append_log(format!(
+        "control done status={} elapsed_ms={} args=\"{}\" stdout=\"{}\" stderr=\"{}\"",
+        output.status,
+        started.elapsed().as_millis(),
+        display_args(args),
+        stdout.chars().take(500).collect::<String>(),
+        stderr.chars().take(500).collect::<String>()
+    ));
 
     if output.status.success() {
         Ok(stdout)
@@ -189,8 +293,12 @@ fn refresh_brightness_cache(state: &AppState) -> Result<DisplayBrightness, Strin
 }
 
 fn refresh_live_cache(state: &AppState) {
-    let _ = refresh_status_cache(state);
-    let _ = refresh_brightness_cache(state);
+    if let Err(error) = refresh_status_cache(state) {
+        append_log(format!("status refresh failed: {error}"));
+    }
+    if let Err(error) = refresh_brightness_cache(state) {
+        append_log(format!("brightness refresh failed: {error}"));
+    }
 }
 
 fn update_tray_state(app: &AppHandle) {
@@ -431,7 +539,11 @@ fn show_main_window(app: &tauri::AppHandle) {
 fn run_tray_action(helper: &str, args: &[&str]) {
     let mut control_args = vec![String::from("action"), helper.to_string()];
     control_args.extend(args.iter().map(|arg| arg.to_string()));
-    let _ = run_control(&control_args);
+    thread::spawn(move || {
+        if let Err(error) = run_control(&control_args) {
+            append_log(format!("tray action failed: {error}"));
+        }
+    });
 }
 
 fn build_tray(app: &tauri::App) -> tauri::Result<()> {
@@ -534,6 +646,7 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    append_log("ui starting");
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(AppState::default())
